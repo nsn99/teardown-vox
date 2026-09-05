@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.local
+.vite/
+apps/web/public/assets/generated/
