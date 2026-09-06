@@ -232,8 +232,6 @@ export class FireSystem {
           this.burningTotal--;
           continue;
         }
-        const def = material(mat);
-
         cell.heat = Math.min(1, cell.heat + dt * 0.8);
         cell.fuel -= cfg.burnRate * dt * cell.heat;
 

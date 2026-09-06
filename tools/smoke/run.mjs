@@ -107,13 +107,29 @@ try {
   await step('старт миссии и построение уровня', async () => {
     await page.click('#btn-mission');
     await page.waitForFunction(() => document.getElementById('menu')?.hasAttribute('hidden') === true);
-    // Даём меширование: чанки строятся с бюджетом за кадр.
-    await page.waitForTimeout(9000);
+    // Ждём не «сколько-нибудь секунд», а конкретного состояния: ни одного
+    // недостроенного чанка. Фиксированная пауза — это ставка на скорость
+    // раннера, а раннер бывает втрое медленнее ноутбука.
+    await page.waitForFunction(
+      () => (window.tvox?.renderer?.stats?.dirty ?? 1) === 0 && (window.tvox?.renderer?.stats?.chunks ?? 0) > 0,
+      undefined,
+      { timeout: 90000, polling: 250 },
+    );
+    // Кадр после сборки: свет и тени должны успеть лечь.
+    await page.waitForTimeout(600);
   });
   await page.screenshot({ path: join(outDir, '02-port.png') });
 
   const built = await page.evaluate(() => document.querySelector('#stats')?.textContent ?? '');
   if (!/вокселей: [1-9]/.test(built)) throw new Error(`Уровень не построился: ${built}`);
+
+  // Отдельная проверка до яркости: если геометрии в сцене нет, диагноз
+  // должен быть «нечего показывать», а не «кадр тёмный».
+  const mesh = await page.evaluate(() => ({ ...window.tvox.renderer.stats }));
+  if (mesh.quads <= 0 || mesh.dirty > 0) {
+    throw new Error(`Сцена не смеширована: ${JSON.stringify(mesh)}`);
+  }
+  steps.push(`сцена: чанков ${mesh.chunks}, квадов ${mesh.quads.toLocaleString('ru-RU')}`);
 
   await step('сцена не чёрная', async () => {
     // WebGL-канвас без preserveDrawingBuffer отдаёт через toBlob пустоту,
@@ -251,8 +267,8 @@ async function tryCanvas() {
 
 async function voxelCount(page) {
   const text = await page.evaluate(() => document.querySelector('#stats')?.textContent ?? '');
-  const m = text.match(/вокселей: ([\d\s ]+)/);
-  return m ? Number(m[1].replace(/[\s ]/g, '')) : -1;
+  const m = text.match(/вокселей: ([\d\s\u00a0]+)/);
+  return m ? Number(m[1].replace(/[\s\u00a0]/g, '')) : -1;
 }
 
 /** Playwright кладёт браузер в каталог с версией — ищем, а не гадаем. */

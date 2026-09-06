@@ -234,3 +234,52 @@ html, body {
 .result__panel h2 { margin: 0 0 10px; font-size: 24px; }
 .result__panel p { margin: 0 0 20px; color: var(--muted); line-height: 1.6; white-space: pre-line; }
 .result__panel .btn { margin-right: 10px; }
+
+/* Подлёт: полоса набирается по мере приближения вертолёта. */
+.chase {
+  position: absolute;
+  top: 5.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.4rem;
+  background: rgba(12, 16, 22, 0.72);
+  font: 600 0.72rem/1 var(--ui-font, system-ui, sans-serif);
+  letter-spacing: 0.14em;
+  color: var(--danger, #ff5a4a);
+}
+
+.chase__bar {
+  display: block;
+  width: 8rem;
+  height: 0.32rem;
+  border-radius: 0.2rem;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.chase__bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--danger, #ff5a4a);
+  transition: width 0.2s linear;
+}
+
+/* Файл тащат над окном — показываем, что его ждут. */
+body.is-dropping::after {
+  content: 'Отпусти файл карты: .json или .vox';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 14, 20, 0.55);
+  border: 2px dashed rgba(255, 255, 255, 0.35);
+  font: 600 1rem/1 var(--ui-font, system-ui, sans-serif);
+  color: #fff;
+  pointer-events: none;
+  z-index: 50;
+}

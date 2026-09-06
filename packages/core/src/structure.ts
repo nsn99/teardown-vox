@@ -1,5 +1,5 @@
 import { Vec3, add, rotateVec, v3 } from './math.js';
-import { MATERIALS, Mat, carriesLoad, material, voxelMass } from './materials.js';
+import { MATERIALS, Mat, carriesLoad, material } from './materials.js';
 import { CHUNK_SIZE, VoxelShape } from './voxel-shape.js';
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
@@ -583,10 +583,6 @@ const LATERAL: ReadonlyArray<readonly [number, number]> = [
   [0, -1],
 ];
 
-function hasSupportBelow(shape: VoxelShape, x: number, y: number, z: number): boolean {
-  if (y === 0) return true;
-  return collectSupportersBelow(shape, x, y, z).length > 0;
-}
 
 /**
  * Свойства материалов, разложенные по типизированным массивам.
@@ -683,23 +679,6 @@ function supportersBelow(
   return n;
 }
 
-/** Опоры под вокселем: сначала прямо под ним, иначе четыре диагонали. */
-function collectSupportersBelow(shape: VoxelShape, x: number, y: number, z: number): number[] {
-  if (y === 0) return [];
-  const direct = shape.idx(x, y - 1, z);
-  const dm = shape.data[direct];
-  if (dm !== Mat.Air && carriesLoad(dm)) return [direct];
-  const out: number[] = [];
-  for (const [dx, dz] of LATERAL) {
-    const nx = x + dx;
-    const nz = z + dz;
-    if (nx < 0 || nz < 0 || nx >= shape.sx || nz >= shape.sz) continue;
-    const j = shape.idx(nx, y - 1, nz);
-    const m = shape.data[j];
-    if (m !== Mat.Air && carriesLoad(m)) out.push(j);
-  }
-  return out;
-}
 
 /**
  * Мельче этого объёма форму считаем целиком: частичный проход по кубику

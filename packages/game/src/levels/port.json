@@ -1,0 +1,1025 @@
+{
+  "format": "tvox-level",
+  "version": 1,
+  "id": "port",
+  "name": "Порт",
+  "brief": "Сейф в кладовой склада и документы в офисе. Оба на кабеле. Как только снимешь первый — шестьдесят секунд до вертолёта. Маршрут отхода готовь заранее.",
+  "voxelSize": 0.1,
+  "waterLevel": -0.4,
+  "spawn": {
+    "position": [
+      45,
+      0.05,
+      33
+    ],
+    "yaw": 0
+  },
+  "volumes": [
+    {
+      "name": "ground",
+      "size": [
+        480,
+        30,
+        360
+      ],
+      "position": [
+        0,
+        -3,
+        0
+      ],
+      "grounded": true,
+      "structural": false,
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            480,
+            3,
+            360
+          ],
+          "mat": "foundation"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            3,
+            0,
+            480,
+            27,
+            360
+          ],
+          "mat": "dirt"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            27,
+            0,
+            480,
+            30,
+            360
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            12,
+            0,
+            480,
+            30,
+            100
+          ],
+          "mat": "air"
+        }
+      ]
+    },
+    {
+      "name": "warehouse",
+      "size": [
+        200,
+        80,
+        160
+      ],
+      "position": [
+        6,
+        0,
+        14
+      ],
+      "ops": [
+        {
+          "op": "hollow",
+          "wall": "brick",
+          "roof": "metal",
+          "floor": "concrete",
+          "thickness": 3,
+          "roofThickness": 1
+        },
+        {
+          "op": "beams",
+          "y": 74,
+          "height": 5,
+          "spacingX": 40,
+          "spacingZ": 40,
+          "width": 3,
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            80,
+            0,
+            0,
+            120,
+            40,
+            3
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "grid",
+          "box": [
+            20,
+            55,
+            0,
+            180,
+            70,
+            3
+          ],
+          "cell": [
+            20,
+            15,
+            3
+          ],
+          "step": [
+            40,
+            1000,
+            1000
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "grid",
+          "box": [
+            20,
+            55,
+            157,
+            180,
+            70,
+            160
+          ],
+          "cell": [
+            20,
+            15,
+            3
+          ],
+          "step": [
+            40,
+            1000,
+            1000
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "grid",
+          "box": [
+            38,
+            3,
+            38,
+            162,
+            74,
+            122
+          ],
+          "cell": [
+            4,
+            71,
+            4
+          ],
+          "step": [
+            40,
+            1000,
+            40
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            140,
+            3,
+            100,
+            190,
+            50,
+            150
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            143,
+            3,
+            103,
+            189,
+            48,
+            149
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            140,
+            3,
+            120,
+            143,
+            45,
+            135
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "line",
+          "mat": "cable",
+          "points": [
+            [
+              20,
+              73,
+              3
+            ],
+            [
+              190,
+              73,
+              3
+            ],
+            [
+              190,
+              73,
+              120
+            ],
+            [
+              190,
+              51,
+              120
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "office",
+      "size": [
+        100,
+        60,
+        100
+      ],
+      "position": [
+        30,
+        0,
+        14
+      ],
+      "ops": [
+        {
+          "op": "hollow",
+          "wall": "concrete",
+          "roof": "concrete",
+          "floor": "concrete",
+          "thickness": 2,
+          "roofThickness": 2
+        },
+        {
+          "op": "fill",
+          "box": [
+            10,
+            10,
+            0,
+            90,
+            28,
+            2
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "fill",
+          "box": [
+            10,
+            10,
+            98,
+            90,
+            28,
+            100
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            10,
+            10,
+            2,
+            28,
+            90
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "fill",
+          "box": [
+            2,
+            30,
+            2,
+            98,
+            32,
+            98
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            70,
+            30,
+            70,
+            90,
+            32,
+            90
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            46,
+            2,
+            46,
+            54,
+            58,
+            54
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            42,
+            0,
+            0,
+            58,
+            22,
+            2
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            38,
+            22,
+            0,
+            62,
+            32,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "line",
+          "mat": "cable",
+          "points": [
+            [
+              10,
+              34,
+              2
+            ],
+            [
+              90,
+              34,
+              2
+            ],
+            [
+              90,
+              8,
+              2
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "crane",
+      "size": [
+        80,
+        140,
+        60
+      ],
+      "position": [
+        28,
+        0,
+        4
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            80,
+            8,
+            60
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            10,
+            8,
+            10,
+            40,
+            14,
+            40
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            10,
+            0,
+            15,
+            40,
+            110,
+            45
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            13,
+            14,
+            18,
+            37,
+            107,
+            42
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            110,
+            0,
+            50,
+            113,
+            60
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            113,
+            0,
+            50,
+            136,
+            60
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            2,
+            113,
+            2,
+            48,
+            132,
+            58
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            2,
+            116,
+            0,
+            48,
+            130,
+            2
+          ],
+          "mat": "glass"
+        },
+        {
+          "op": "fill",
+          "box": [
+            35,
+            95,
+            24,
+            70,
+            101,
+            36
+          ],
+          "mat": "heavy_metal"
+        }
+      ]
+    },
+    {
+      "name": "pier",
+      "size": [
+        140,
+        22,
+        90
+      ],
+      "position": [
+        4,
+        -1.8,
+        0.5
+      ],
+      "ops": [
+        {
+          "op": "grid",
+          "box": [
+            2,
+            0,
+            2,
+            138,
+            20,
+            88
+          ],
+          "cell": [
+            3,
+            20,
+            3
+          ],
+          "step": [
+            15,
+            1000,
+            15
+          ],
+          "mat": "wood"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            20,
+            0,
+            140,
+            22,
+            90
+          ],
+          "mat": "plank"
+        }
+      ]
+    },
+    {
+      "name": "containers",
+      "size": [
+        180,
+        52,
+        30
+      ],
+      "position": [
+        4,
+        0,
+        32
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            58,
+            26,
+            30
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            2,
+            2,
+            2,
+            56,
+            24,
+            28
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            60,
+            0,
+            0,
+            118,
+            26,
+            30
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            62,
+            2,
+            2,
+            116,
+            24,
+            28
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            120,
+            0,
+            0,
+            178,
+            26,
+            30
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            122,
+            2,
+            2,
+            176,
+            24,
+            28
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            26,
+            0,
+            58,
+            52,
+            30
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            2,
+            28,
+            2,
+            56,
+            50,
+            28
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            60,
+            26,
+            0,
+            118,
+            52,
+            30
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            62,
+            28,
+            2,
+            116,
+            50,
+            28
+          ],
+          "mat": "air"
+        }
+      ]
+    },
+    {
+      "name": "fence",
+      "size": [
+        480,
+        25,
+        260
+      ],
+      "position": [
+        0,
+        0,
+        10
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            258,
+            480,
+            25,
+            260
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            2,
+            25,
+            260
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            478,
+            0,
+            0,
+            480,
+            25,
+            260
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            420,
+            0,
+            258,
+            470,
+            25,
+            260
+          ],
+          "mat": "air"
+        }
+      ]
+    }
+  ],
+  "props": [
+    {
+      "name": "harbour",
+      "kind": "static",
+      "tags": [
+        "water"
+      ],
+      "passive": true,
+      "volume": {
+        "name": "water",
+        "size": [
+          480,
+          14,
+          100
+        ],
+        "position": [
+          0,
+          -1.8,
+          0
+        ],
+        "grounded": false,
+        "structural": false,
+        "ops": [
+          {
+            "op": "fill",
+            "box": [
+              0,
+              0,
+              0,
+              480,
+              14,
+              100
+            ],
+            "mat": "water"
+          }
+        ]
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "alarm-cable-warehouse",
+      "kind": "alarm-cable",
+      "center": [
+        22.5,
+        1,
+        26.5
+      ],
+      "halfExtents": [
+        2.5,
+        2,
+        2.5
+      ],
+      "once": true,
+      "label": "Кабель сигнализации, кладовая"
+    },
+    {
+      "id": "alarm-cable-office",
+      "kind": "alarm-cable",
+      "center": [
+        35,
+        4,
+        19
+      ],
+      "halfExtents": [
+        2.5,
+        1.5,
+        2.5
+      ],
+      "once": true,
+      "label": "Кабель сигнализации, второй этаж"
+    },
+    {
+      "id": "extraction",
+      "kind": "extraction",
+      "center": [
+        45,
+        1.5,
+        33
+      ],
+      "halfExtents": [
+        3,
+        2.5,
+        3
+      ],
+      "label": "Зона эвакуации"
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "van",
+      "kind": "pickup",
+      "position": [
+        44,
+        0.1,
+        28
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "car",
+      "kind": "car",
+      "position": [
+        38,
+        0.1,
+        30
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "boat",
+      "kind": "boat",
+      "position": [
+        10,
+        -0.4,
+        4
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "dozer",
+      "kind": "bulldozer",
+      "position": [
+        24,
+        0.1,
+        32
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "digger",
+      "kind": "excavator",
+      "position": [
+        20,
+        0.1,
+        12
+      ],
+      "yaw": 1.5707963267948966
+    }
+  ],
+  "mission": {
+    "id": "port",
+    "name": "Порт: ночная смена",
+    "brief": "Сейф в кладовой склада и документы в офисе. Оба на кабеле. Как только снимешь первый — шестьдесят секунд до вертолёта. Маршрут отхода готовь заранее.",
+    "alarmSeconds": 60,
+    "maxCarried": 1,
+    "requirePlayerInZone": true,
+    "extraction": {
+      "center": [
+        45,
+        1.5,
+        33
+      ],
+      "halfExtents": [
+        3,
+        2.5,
+        3
+      ]
+    },
+    "targets": [
+      {
+        "id": "safe",
+        "name": "Сейф",
+        "kind": "safe",
+        "wired": true,
+        "required": true,
+        "value": 42000,
+        "position": [
+          22.5,
+          0.4,
+          26.5
+        ],
+        "mass": 180
+      },
+      {
+        "id": "docs",
+        "name": "Папка с документами",
+        "kind": "documents",
+        "wired": true,
+        "required": true,
+        "value": 26000,
+        "position": [
+          35,
+          3.4,
+          19
+        ],
+        "mass": 6
+      },
+      {
+        "id": "painting",
+        "name": "Картина",
+        "kind": "painting",
+        "wired": false,
+        "required": false,
+        "value": 14000,
+        "position": [
+          38,
+          0.6,
+          22
+        ],
+        "mass": 12
+      },
+      {
+        "id": "electronics",
+        "name": "Ящик электроники",
+        "kind": "electronics",
+        "wired": false,
+        "required": false,
+        "value": 9000,
+        "position": [
+          7,
+          0.4,
+          33.5
+        ],
+        "mass": 40
+      },
+      {
+        "id": "cash",
+        "name": "Инкассаторская сумка",
+        "kind": "cash",
+        "wired": false,
+        "required": false,
+        "value": 17000,
+        "position": [
+          31,
+          11.4,
+          7
+        ],
+        "mass": 25
+      }
+    ]
+  },
+  "pursuit": [
+    {
+      "kind": "helicopter",
+      "from": [
+        24,
+        46,
+        -64
+      ],
+      "hover": 15,
+      "maxSpeed": 34,
+      "lead": 20,
+      "light": 9
+    },
+    {
+      "kind": "boat",
+      "from": [
+        -22,
+        -0.4,
+        5
+      ],
+      "hover": 0,
+      "maxSpeed": 18,
+      "lead": 26,
+      "light": 7,
+      "aquatic": true
+    }
+  ]
+}

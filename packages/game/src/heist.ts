@@ -10,11 +10,12 @@ import {
   scale,
   v3,
 } from '@tvox/core';
-import { CharacterController, CharacterInput } from './character.js';
+import { CharacterController, CharacterInput, overlapsSolid } from './character.js';
 import { Inventory } from './inventory.js';
 import { LevelSource, TriggerDef, TriggerSystem } from './level.js';
 import { Mission, MissionResult } from './mission.js';
 import { Profile } from './progression.js';
+import { Pursuit } from './pursuit.js';
 import { ChargeSystem, PlankBuilder, ToolContext, ToolUseResult, useTool } from './tool-use.js';
 import { CARGO_OFFSET, NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
 
@@ -63,6 +64,8 @@ export class Heist {
   readonly character: CharacterController;
   readonly charges = new ChargeSystem();
   readonly planks = new PlankBuilder();
+  /** Вертолёт и катер: то, чем кончается таймер. */
+  readonly pursuit: Pursuit;
   readonly events = new EventBus<HeistEvents>();
   readonly level: LevelSource;
   readonly profile: Profile;
@@ -99,6 +102,11 @@ export class Heist {
     });
     this.character = new CharacterController({ position: opts.level.spawn.position });
     this.yaw = opts.level.spawn.yaw;
+    this.pursuit = new Pursuit({
+      ...(opts.level.pursuit ? { specs: opts.level.pursuit } : {}),
+      voxelSize: opts.level.voxelSize,
+      waterLevel: opts.level.waterLevel,
+    });
   }
 
   get playerPosition(): Vec3 {
@@ -331,12 +339,45 @@ export class Heist {
     return id;
   }
 
+  /**
+   * Куда высадить игрока из этой машины.
+   *
+   * Фиксированная точка «сбоку от кузова» работает ровно до первого раза,
+   * когда машина стоит вплотную к стене или в яме от заряда: игрок
+   * оказывается внутри геометрии и застревает. Поэтому перебираем места
+   * вокруг машины и берём первое свободное, а если свободных нет вообще —
+   * сажаем на крышу: над кузовом пусто по построению.
+   */
+  exitPosition(veh: Vehicle): Vec3 {
+    const side = (veh.spec.size.z / 2) * this.level.voxelSize;
+    const back = (veh.spec.size.x / 2) * this.level.voxelSize;
+    const fits = (p: Vec3): boolean =>
+      !overlapsSolid(this.sim.world, this.character.aabbAt(p));
+
+    // Направления считаем от машины, а не от мировых осей: «вбок» — это
+    // вбок от кузова, куда бы он ни был повёрнут.
+    const fwd = veh.forward;
+    const right = v3(Math.cos(veh.yaw), 0, -Math.sin(veh.yaw));
+
+    for (const dist of [side + 0.6, side + 1.2, back + 1.0]) {
+      for (const angle of EXIT_ANGLES) {
+        const dir = add(scale(fwd, Math.cos(angle)), scale(right, Math.sin(angle)));
+        const at = add(veh.position, scale(dir, dist));
+        const candidate = v3(at.x, veh.position.y + 0.2, at.z);
+        if (fits(candidate)) return candidate;
+      }
+    }
+    // Свободных мест вокруг нет вообще — значит, машину завалило.
+    // Крыша своего же кузова остаётся единственным честным вариантом:
+    // лучше стоять на капоте, чем внутри стены.
+    return add(veh.position, v3(0, (veh.spec.size.y + 2) * this.level.voxelSize, 0));
+  }
+
   /** Сесть за руль ближайшей техники / выйти. */
   toggleVehicle(): string | null {
     if (this.drivingId) {
       const veh = this.vehicles.get(this.drivingId)!;
-      const exitAt = add(veh.position, v3(0, 0.2, (veh.spec.size.z / 2 + 6) * this.level.voxelSize));
-      this.character.teleport(exitAt);
+      this.character.teleport(this.exitPosition(veh));
       const id = this.drivingId;
       this.drivingId = null;
       this.events.emit('vehicle:exited', { id });
@@ -404,7 +445,26 @@ export class Heist {
       }
       this.syncTargetPositions();
       this.finishIfNeeded();
+      // Погоня идёт после миссии: вертолёт должен видеть тот же остаток
+      // таймера, что и HUD, иначе он приходит на кадр раньше цифры «0».
+      // После финала таймер уже ничего не значит, поэтому подставляем ноль
+      // только на провале по времени — на успехе вертолёт просто проходит
+      // мимо, и это правильная картинка: успел.
+      this.pursuit.update(this.sim, dt, this.pursuitState(), pos);
     }
+  }
+
+  private pursuitState() {
+    const timedOut = this.mission.result?.reason === 'timeout';
+    return {
+      alarmActive: this.mission.alarmActive,
+      timeLeft: this.mission.finished
+        ? timedOut
+          ? 0
+          : this.mission.config.alarmSeconds
+        : this.mission.timeLeft,
+      finished: this.mission.finished,
+    };
   }
 
   /** Цели, лежащие в мире, могли уехать вместе с обломками. */
@@ -426,6 +486,7 @@ export class Heist {
 
   restart(): void {
     this.mission.restart();
+    this.pursuit.reset(this.sim);
     this.triggers.reset();
     this.charges.clear();
     this.planks.cancel();
@@ -438,6 +499,21 @@ export class Heist {
     this.start();
   }
 }
+
+/**
+ * Куда пробуем высадить: сначала по бортам, потом назад, потом вперёд.
+ * Порядок не случайный — выходить принято вбок, а не под собственные колёса.
+ */
+const EXIT_ANGLES: readonly number[] = [
+  Math.PI / 2,
+  -Math.PI / 2,
+  Math.PI,
+  0,
+  Math.PI * 0.75,
+  -Math.PI * 0.75,
+  Math.PI * 0.25,
+  -Math.PI * 0.25,
+];
 
 const PROTECTED: ReadonlySet<number> = new Set([Mat.Loot]);
 const EMPTY_SET: ReadonlySet<number> = new Set();

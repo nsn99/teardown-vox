@@ -1,6 +1,5 @@
 import {
   Body,
-  Brush,
   CarveResult,
   Mat,
   Simulation,

@@ -17,6 +17,7 @@ export type SoundId =
   | 'explosion'
   | 'collapse'
   | 'siren'
+  | 'rotor'
   | 'fire'
   | 'splash'
   | 'pickup';
@@ -82,6 +83,7 @@ const PITCH: Record<SoundId, number> = {
   explosion: 0.6,
   collapse: 0.5,
   siren: 1,
+  rotor: 1,
   fire: 1,
   splash: 1.1,
   pickup: 1.2,
@@ -92,6 +94,8 @@ export interface MissionAudioState {
   /** Секунд до вертолёта. */
   timeLeft: number;
   alarmSeconds: number;
+  /** Близость преследователя, 0..1. Единица — прямо над головой. */
+  pursuit?: number;
 }
 
 interface Pending {
@@ -264,6 +268,20 @@ export class AudioDirector {
         id: 'siren',
         gain: clamp01(0.45 + spent * 0.5),
         pitch: 1 + spent * 0.35,
+        at: null,
+        loop: true,
+      });
+    }
+
+    // Винт слышно раньше, чем видно, и это единственное предупреждение,
+    // которое игрок получает вовремя. Высота тона растёт с приближением:
+    // так «он ещё далеко» и «он уже над тобой» различаются на слух.
+    const near = mission?.pursuit ?? 0;
+    if (near > 0.02) {
+      out.push({
+        id: 'rotor',
+        gain: clamp01(0.12 + near * 0.75),
+        pitch: 0.8 + near * 0.5,
         at: null,
         loop: true,
       });

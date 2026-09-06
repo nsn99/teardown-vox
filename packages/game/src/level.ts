@@ -1,5 +1,6 @@
 import { Body, EventBus, Simulation, Vec3, aabbContains, v3 } from '@tvox/core';
 import { MissionConfig } from './mission.js';
+import { ChaserSpec } from './pursuit.js';
 import { VehicleKind } from './vehicles.js';
 
 export type TriggerKind = 'alarm-cable' | 'extraction' | 'checkpoint' | 'hazard';
@@ -42,6 +43,8 @@ export interface LevelSource {
   triggers: TriggerDef[];
   vehicles: VehicleSpawnDef[];
   mission: MissionConfig;
+  /** Кто приходит по концу таймера тревоги. Пусто — умолчания погони. */
+  pursuit?: ChaserSpec[];
   /** Создаёт тела уровня и возвращает их. */
   build(sim: Simulation): Body[];
 }

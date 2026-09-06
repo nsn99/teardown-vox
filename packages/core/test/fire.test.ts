@@ -25,7 +25,7 @@ describe('поджиг', () => {
     const s = makeShape(4, 4, 4);
     s.set(1, 1, 1, Mat.Wood);
     s.set(2, 1, 1, Mat.Metal);
-    const { world, body } = worldWith(s);
+    const { body } = worldWith(s);
     const fire = new FireSystem();
     expect(fire.ignite(body, s, s.idx(1, 1, 1))).toBe(true);
     expect(fire.ignite(body, s, s.idx(2, 1, 1))).toBe(false);
@@ -35,7 +35,7 @@ describe('поджиг', () => {
   it('воздух не поджечь, повторный поджиг не удваивает', () => {
     const s = makeShape(4, 4, 4);
     s.set(1, 1, 1, Mat.Wood);
-    const { world, body } = worldWith(s);
+    const { body } = worldWith(s);
     const fire = new FireSystem();
     expect(fire.ignite(body, s, s.idx(0, 0, 0))).toBe(false);
     fire.ignite(body, s, s.idx(1, 1, 1));
@@ -217,7 +217,7 @@ describe('тушение', () => {
 describe('жизненный цикл', () => {
   it('reset тушит всё', () => {
     const s = woodWall();
-    const { world, body } = worldWith(s);
+    const { body } = worldWith(s);
     const fire = new FireSystem();
     fire.ignite(body, s, s.idx(12, 11, 1));
     fire.reset();
@@ -236,7 +236,7 @@ describe('жизненный цикл', () => {
 
   it('горящие точки отдаются в мировых координатах', () => {
     const s = woodWall(6, 6, 3);
-    const { world, body } = worldWith(s);
+    const { body } = worldWith(s);
     const fire = new FireSystem();
     fire.ignite(body, s, s.idx(3, 5, 1));
     const pts = [...fire.burningPoints()];

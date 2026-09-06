@@ -68,9 +68,9 @@ export function raycastShape(
 
   // Небольшой сдвиг внутрь, иначе на грани floor даёт соседнюю ячейку.
   const eps = 1e-6;
-  let px = ox + dir.x * (t + eps);
-  let py = oy + dir.y * (t + eps);
-  let pz = oz + dir.z * (t + eps);
+  const px = ox + dir.x * (t + eps);
+  const py = oy + dir.y * (t + eps);
+  const pz = oz + dir.z * (t + eps);
 
   let x = Math.floor(px);
   let y = Math.floor(py);

@@ -326,6 +326,57 @@ export function material(id: number): MaterialDef {
   return m;
 }
 
+const BY_NAME: ReadonlyMap<string, MaterialDef> = new Map(
+  MATERIALS.map((m) => [m.name, m] as const),
+);
+
+/** Список имён материалов — для сообщений об ошибках и подсказок редактора. */
+export const MATERIAL_NAMES: readonly string[] = MATERIALS.map((m) => m.name);
+
+/**
+ * Материал по имени. Нужен формату карты: в файле уровня стоит `"brick"`,
+ * а не `5` — иначе правка руками превращается в сверку с таблицей.
+ */
+export function materialByName(name: string): MaterialDef | null {
+  return BY_NAME.get(name.trim().toLowerCase()) ?? null;
+}
+
+/**
+ * Ближайший материал к цвету RGB.
+ *
+ * Нужен импорту из чужих воксельных форматов: там палитра, а не материалы,
+ * и единственное, что там вообще есть общего с нашей таблицей, — цвет. Воздух и
+ * служебные материалы из подбора исключены: импортированная модель не
+ * должна внезапно оказаться неразрушимым фундаментом или водой.
+ */
+export function materialByColor(r: number, g: number, b: number): MaterialDef {
+  let best = MATERIALS[Mat.Concrete];
+  let bestD = Infinity;
+  for (const m of MATERIALS) {
+    if (EXCLUDED_FROM_PALETTE.has(m.id)) continue;
+    const dr = m.color[0] - r;
+    const dg = m.color[1] - g;
+    const db = m.color[2] - b;
+    // Взвешенная евклидова метрика: глаз чувствительнее к зелёному.
+    const d = dr * dr * 2 + dg * dg * 4 + db * db * 3;
+    if (d < bestD) {
+      bestD = d;
+      best = m;
+    }
+  }
+  return best;
+}
+
+const EXCLUDED_FROM_PALETTE: ReadonlySet<number> = new Set([
+  Mat.Air,
+  Mat.Foundation,
+  Mat.Water,
+  Mat.Paint,
+  Mat.Loot,
+  Mat.Cable,
+  Mat.Charred,
+]);
+
 export const isSolid = (id: number): boolean => id !== Mat.Air;
 
 export const isFlammable = (id: number): boolean =>

@@ -62,6 +62,9 @@ export class VoxelRenderer {
   private groups = new Map<number, THREE.Group>();
   private chunks = new Map<string, ChunkEntry>();
   private shapeChunks = new Map<number, ChunkEntry[]>();
+  private shapeHolders = new Map<number, THREE.Group>();
+  /** Ближайший ремеш идёт целиком, без бюджета: это загрузка уровня. */
+  private priming = true;
   private opaqueMaterial: THREE.MeshStandardMaterial;
   private glassMaterial: THREE.MeshStandardMaterial;
   private chunkSize: number;
@@ -157,6 +160,15 @@ export class VoxelRenderer {
     this.camera.rotation.set(pitch, yaw, 0, 'YXZ');
   }
 
+  /**
+   * Следующий ремеш пройдёт целиком, без бюджета за кадр.
+   * Вызывается при загрузке уровня: лучше один долгий кадр на загрузке,
+   * чем карта, проявляющаяся кусками у игрока на глазах.
+   */
+  prime(): void {
+    this.priming = true;
+  }
+
   /** Подтягивает сцену под текущее состояние мира. */
   sync(world: VoxelWorld): void {
     this.seenShapes.clear();
@@ -180,6 +192,7 @@ export class VoxelRenderer {
       for (const shape of body.shapes) {
         this.seenShapes.add(shape.id);
         this.ensureChunks(body, shape, group);
+        this.syncShapeTransform(shape);
         this.markDirty(shape);
       }
     }
@@ -203,6 +216,7 @@ export class VoxelRenderer {
       shape.transform.rotation.w,
     );
     group.add(holder);
+    this.shapeHolders.set(shape.id, holder);
 
     for (let cy = 0; cy * cs < shape.sy; cy++) {
       for (let cz = 0; cz * cs < shape.sz; cz++) {
@@ -235,6 +249,19 @@ export class VoxelRenderer {
       }
     }
     this.shapeChunks.set(shape.id, list);
+  }
+
+  /**
+   * Трансформ формы внутри тела обновляется каждый кадр, а не один раз при
+   * создании: формы бывают подвижными внутри своего тела — винт вертолёта
+   * крутится, а фюзеляж нет.
+   */
+  private syncShapeTransform(shape: VoxelShape): void {
+    const holder = this.shapeHolders.get(shape.id);
+    if (!holder) return;
+    const t = shape.transform;
+    holder.position.set(t.position.x, t.position.y, t.position.z);
+    holder.quaternion.set(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
   }
 
   private markDirty(shape: VoxelShape): void {
@@ -295,6 +322,8 @@ export class VoxelRenderer {
         c.glass.parent?.remove(c.glass);
         this.chunks.delete(c.key);
       }
+      this.shapeHolders.get(shapeId)?.removeFromParent();
+      this.shapeHolders.delete(shapeId);
       this.shapeChunks.delete(shapeId);
     }
   }
@@ -328,8 +357,11 @@ export class VoxelRenderer {
       (a, b) => ((a as { dist?: number }).dist ?? 0) - ((b as { dist?: number }).dist ?? 0),
     );
 
-    const budget = Math.min(this.remeshBudget, dirty.length);
-    const until = performance.now() + this.remeshMs;
+    // Первая сборка идёт без бюджета: карта обязана появиться целиком, а
+    // не проявляться чанк за чанком минуту после старта. Бюджет — про
+    // разрушение в кадре, а не про загрузку уровня.
+    const budget = this.priming ? dirty.length : Math.min(this.remeshBudget, dirty.length);
+    const until = this.priming ? Infinity : performance.now() + this.remeshMs;
     let done = 0;
     for (let i = 0; i < budget; i++) {
       this.rebuild(dirty[i]);
@@ -338,6 +370,7 @@ export class VoxelRenderer {
       // игрок смотрит, могла бы не появиться совсем.
       if (performance.now() > until) break;
     }
+    this.priming = false;
     this.stats.remeshed = done;
   }
 

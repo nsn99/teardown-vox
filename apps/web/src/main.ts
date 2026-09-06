@@ -2,6 +2,8 @@ import {
   PROFILE_STORAGE_KEY,
   AudioDirector,
   Heist,
+  LevelSource,
+  chaseCamera,
   NEUTRAL_INPUT,
   Profile,
   VehicleInput,
@@ -13,6 +15,7 @@ import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
+import { enableLevelDrop } from './level-drop.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 
@@ -29,9 +32,16 @@ const hud = new Hud();
 const profile = loadProfile();
 
 let heist: Heist | null = null;
+/**
+ * Текущая карта. По умолчанию «Порт», но её можно заменить, бросив файл
+ * в окно: игра не знает и не должна знать, откуда карта взялась.
+ */
+let level: LevelSource = portLevel;
 let paused = true;
 let sandbox = false;
 let last = performance.now();
+/** Вид от третьего лица. Осмысленен за рулём, поэтому включается сам. */
+let thirdPerson = false;
 /** Сглаженная длительность кадра, мс — для честного счётчика кадров. */
 let smoothedFrame = 16;
 
@@ -42,7 +52,7 @@ const menu = new Menu({
     const res = profile.upgrade(tool);
     if (res.ok) {
       saveProfile();
-      menu.render(profile, portLevel.brief);
+      menu.render(profile, level.brief);
       if (heist) heist.inventory.setTier(tool, res.tier);
     }
   },
@@ -59,7 +69,7 @@ const result = new ResultScreen({
   },
 });
 
-menu.render(profile, portLevel.brief);
+menu.render(profile, level.brief);
 menu.show();
 resize();
 window.addEventListener('resize', resize);
@@ -92,8 +102,11 @@ function startRun(inSandbox: boolean): void {
   heist?.sim.dispose();
   particles.clear();
 
-  heist = new Heist({ level: portLevel, profile, sandbox: inSandbox });
+  heist = new Heist({ level, profile, sandbox: inSandbox });
   heist.start();
+  // Карта строится целиком в первый же кадр: бюджет ремеша — про
+  // разрушение по ходу игры, а не про загрузку уровня.
+  renderer.prime();
   wireEvents(heist);
   upgradeToRapier(heist);
 
@@ -119,7 +132,7 @@ function toHub(): void {
   paused = true;
   hud.hide();
   input.releaseLock();
-  menu.render(profile, portLevel.brief);
+  menu.render(profile, level.brief);
   menu.show();
 }
 
@@ -150,7 +163,14 @@ function wireEvents(h: Heist): void {
 
   h.sim.world.events.on('fire:ignited', (e) => particles.emitFire(e.point, 1));
 
-  h.mission.events.on('alarm:started', () => hud.message('Тревога. Шестьдесят секунд', 3));
+  h.mission.events.on('alarm:started', () =>
+    hud.message(`Тревога. ${Math.round(h.mission.config.alarmSeconds)} секунд`, 3),
+  );
+
+  h.pursuit.events.on('pursuit:inbound', (e) =>
+    hud.message(e.kind === 'boat' ? 'Катер в гавани' : 'Вертолёт на подлёте', 3),
+  );
+  h.pursuit.events.on('pursuit:close', () => hud.message('Он над тобой', 2));
   h.mission.events.on('target:delivered', (e) => hud.message(`${e.target.name} — в машине`, 2));
 
   h.events.on('heist:finished', (r) => {
@@ -213,7 +233,17 @@ function handleActions(h: Heist): void {
 
   if (input.take('KeyF')) {
     const id = h.toggleVehicle();
-    if (id) hud.message(h.driving ? `За рулём: ${h.driving.spec.name}` : 'Вышел', 1.5);
+    if (id) {
+      // За рулём вид от третьего лица уместнее: видно габариты и то, во что
+      // ты сейчас въедешь. Пешком — обратно от первого.
+      thirdPerson = h.driving !== null;
+      hud.message(h.driving ? `За рулём: ${h.driving.spec.name}` : 'Вышел', 1.5);
+    }
+  }
+
+  if (input.take('KeyV')) {
+    thirdPerson = !thirdPerson;
+    hud.message(thirdPerson ? 'Вид от третьего лица' : 'Вид от первого лица', 1.2);
   }
 
   if (input.take('Mouse2')) {
@@ -232,7 +262,7 @@ function handleActions(h: Heist): void {
   if (input.take('Escape')) {
     input.releaseLock();
     paused = true;
-    menu.render(profile, portLevel.brief);
+    menu.render(profile, level.brief);
     menu.show();
   }
 
@@ -251,6 +281,23 @@ function handleActions(h: Heist): void {
       hud.message('Пусто', 1);
     }
   }
+}
+
+/**
+ * Откуда смотрим. От третьего лица камера отъезжает назад, но упирается в
+ * геометрию: провалившаяся в стену камера — это чёрный экран и потеря
+ * управления, а не «немного другой ракурс».
+ */
+function cameraEye(h: Heist): { x: number; y: number; z: number } {
+  if (!thirdPerson) return h.eye;
+  const veh = h.driving;
+  const ignore = new Set<number>();
+  if (veh) ignore.add(veh.body.id);
+  return chaseCamera(h.sim.world, h.eye, h.yaw, h.pitch, {
+    distance: veh ? 7 : 3.2,
+    height: veh ? 1.2 : 0.35,
+    ignore,
+  });
 }
 
 function readVehicleInput(): VehicleInput {
@@ -297,10 +344,13 @@ function frame(now: number): void {
       alarmActive: h.mission.alarmActive,
       timeLeft: h.mission.timeLeft,
       alarmSeconds: h.level.mission.alarmSeconds ?? 60,
+      // Винт слышно раньше, чем видно: это единственное предупреждение,
+      // которое приходит вовремя.
+      pursuit: h.pursuit.proximity(h.eye),
     }),
   );
 
-  renderer.setCamera(h.eye, h.yaw, h.pitch);
+  renderer.setCamera(cameraEye(h), h.yaw, h.pitch);
   renderer.sync(h.sim.world);
   renderer.render();
 
@@ -356,6 +406,28 @@ window.tvox = {
   core: { carve, stepStructure },
 };
 
+/**
+ * Карту можно принести свою: `.json` в формате игры или `.vox` из
+ * MagicaVoxel. Бросил в окно — играешь. Пересобирать приложение для этого
+ * не нужно, и это ровно то, чего не хватало формату уровня.
+ */
+enableLevelDrop(window, {
+  onLevel(next, fileName) {
+    level = next;
+    hud.message(`Карта: ${next.name} (${fileName})`, 3);
+    menu.render(profile, level.brief);
+    if (paused) menu.show();
+    else startRun(sandbox);
+  },
+  onError(message) {
+    hud.message(`Карта не загрузилась. ${message}`, 6);
+    console.error(message);
+  },
+  onHover(over) {
+    document.body.classList.toggle('is-dropping', over);
+  },
+});
+
 canvas.addEventListener('click', () => {
   // Браузер пускает звук только после жеста — клик по канвасу и есть жест.
   player.resume();
@@ -365,7 +437,7 @@ canvas.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => {
   if (!input.locked && !paused && !menu.visible && !result.visible) {
     paused = true;
-    menu.render(profile, portLevel.brief);
+    menu.render(profile, level.brief);
     menu.show();
   }
 });

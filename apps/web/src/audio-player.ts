@@ -13,6 +13,8 @@ import { SoundCue, SoundId } from '@tvox/game';
 interface Voice {
   gain: GainNode;
   stop: () => void;
+  /** Тянущийся звук может менять высоту на ходу — винт этим и живёт. */
+  setPitch?: (pitch: number) => void;
 }
 
 /** Настройки тембра разовых ударов. */
@@ -36,8 +38,18 @@ export class AudioPlayer {
 
   /** Слышимость зависит от жеста пользователя: браузер иначе не пустит. */
   resume(): void {
-    if (!this.ctx) this.init();
-    void this.ctx?.resume();
+    try {
+      if (!this.ctx) this.init();
+    } catch (err) {
+      // Web Audio может быть недоступен вовсе — в headless, под политикой
+      // автовоспроизведения, в приватном режиме. Игра от этого не должна
+      // падать: без звука играть можно, с исключением в кадре — нет.
+      console.warn('Звук недоступен', err);
+      return;
+    }
+    // Отказ resume() — обычное дело до жеста пользователя, и он не должен
+    // всплывать необработанным отказом промиса.
+    this.ctx?.resume().catch(() => undefined);
   }
 
   setMuted(value: boolean): void {
@@ -129,10 +141,68 @@ export class AudioPlayer {
     const existing = this.loops.get(cue.id);
     if (existing) {
       existing.gain.gain.setTargetAtTime(cue.gain, ctx.currentTime, 0.08);
+      existing.setPitch?.(cue.pitch);
       return;
     }
-    const voice = cue.id === 'siren' ? this.makeSiren(cue) : this.makeFire(cue);
+    const voice =
+      cue.id === 'siren'
+        ? this.makeSiren(cue)
+        : cue.id === 'rotor'
+          ? this.makeRotor(cue)
+          : this.makeFire(cue);
     if (voice) this.loops.set(cue.id, voice);
+  }
+
+  /**
+   * Винт: шум через узкий полосовой фильтр, рубленый быстрым качанием
+   * громкости. Никакой записи вертолёта — только «вжух-вжух-вжух»,
+   * который на приближении учащается и лезет вверх по частоте.
+   */
+  private makeRotor(cue: SoundCue): Voice | null {
+    const ctx = this.ctx;
+    const master = this.master;
+    const noise = this.noise;
+    if (!ctx || !master || !noise) return null;
+
+    const gain = ctx.createGain();
+    gain.gain.value = cue.gain;
+    gain.connect(master);
+
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+
+    const body = ctx.createBiquadFilter();
+    body.type = 'bandpass';
+    body.frequency.value = 180 * cue.pitch;
+    body.Q.value = 2.4;
+
+    // Лопасти: прямоугольник по громкости — именно он даёт узнаваемый стук.
+    const chop = ctx.createOscillator();
+    chop.type = 'square';
+    chop.frequency.value = 11 * cue.pitch;
+    const chopDepth = ctx.createGain();
+    chopDepth.gain.value = 0.5;
+    const vca = ctx.createGain();
+    vca.gain.value = 0.5;
+    chop.connect(chopDepth).connect(vca.gain);
+
+    src.connect(body).connect(vca).connect(gain);
+    src.start();
+    chop.start();
+
+    return {
+      gain,
+      setPitch: (pitch: number) => {
+        body.frequency.setTargetAtTime(180 * pitch, ctx.currentTime, 0.2);
+        chop.frequency.setTargetAtTime(11 * pitch, ctx.currentTime, 0.2);
+      },
+      stop: () => {
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+        src.stop(ctx.currentTime + 0.5);
+        chop.stop(ctx.currentTime + 0.5);
+      },
+    };
   }
 
   /** Сирена: две пилы в расстройке плюс медленное качание высоты. */

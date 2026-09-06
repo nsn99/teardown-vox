@@ -18,6 +18,8 @@ export class Hud {
   private toolTier = $('tool-tier');
   private toolAmmo = $('tool-ammo');
   private belt = $<HTMLUListElement>('belt');
+  private chase = $('chase');
+  private chaseFill = $('chase-fill');
   private hint = $('hint');
   private stats = $('stats');
   private hintTimer = 0;
@@ -51,6 +53,15 @@ export class Hud {
       const left = m.timeLeft;
       this.alarmTime.textContent = left.toFixed(1);
       this.alarm.classList.toggle('alarm--critical', left <= 10);
+    }
+
+    // Погоня: полоса растёт по мере приближения. Точных метров игроку не
+    // нужно — нужно понимать, успевает он или уже нет.
+    const near = heist.pursuit.proximity(heist.eye);
+    this.chase.hidden = near <= 0.01;
+    if (!this.chase.hidden) {
+      this.chaseFill.style.width = `${Math.round(near * 100)}%`;
+      this.chase.classList.toggle('alarm--critical', near > 0.75);
     }
 
     // Список целей: обязательные сверху, вынесенные зачёркнуты.
