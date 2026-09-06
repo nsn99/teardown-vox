@@ -26,6 +26,11 @@ export enum Mat {
   Paint = 14,
   Water = 15,
   Loot = 16,
+  /**
+   * Кабель сигнализации. Виден на стене, режется чем угодно и ничего не
+   * держит — зато при разрыве включает сирену.
+   */
+  Cable = 17,
 }
 
 export interface MaterialDef {
@@ -208,6 +213,18 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
     }),
   );
   put(
+    def(Mat.Cable, 'cable', {
+      density: 1400,
+      // Режется чем угодно, вплоть до руки: смысл кабеля не в прочности,
+      // а в том, что игрок должен его заметить и обойти.
+      toughness: 0.02,
+      hp: 4,
+      color: [214, 74, 52],
+      emissive: 0.25,
+      roughness: 0.6,
+    }),
+  );
+  put(
     def(Mat.Glass, 'glass', {
       density: 2500,
       toughness: 0.05,
@@ -316,7 +333,7 @@ export const isFlammable = (id: number): boolean =>
 
 /** Воксель считается несущим, если его вообще имеет смысл считать в нагрузке. */
 export const carriesLoad = (id: number): boolean =>
-  id !== Mat.Air && id !== Mat.Paint && id !== Mat.Water;
+  id !== Mat.Air && id !== Mat.Paint && id !== Mat.Water && id !== Mat.Cable;
 
 /** Масса одного вокселя, кг. */
 export const voxelMass = (id: number, voxelSize: number): number =>

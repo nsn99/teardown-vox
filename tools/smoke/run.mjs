@@ -78,6 +78,15 @@ page.on('response', (r) => {
   if (r.status() >= 400) errors.push(`http ${r.status()}: ${r.url()}`);
 });
 
+// Предохранитель: прогон, который завис, должен падать, а не занимать
+// раннер на полчаса.
+const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 240_000);
+const hardStop = setTimeout(() => {
+  console.error(`Дымовой прогон не уложился в ${HARD_TIMEOUT_MS} мс.`);
+  process.exit(1);
+}, HARD_TIMEOUT_MS);
+hardStop.unref();
+
 const steps = [];
 const step = async (name, fn) => {
   const t0 = Date.now();
@@ -171,10 +180,14 @@ try {
     if (res.carved <= 0) throw new Error('Замер бессмыслен: удары ничего не сняли');
     // Кадр — 16.6 мс на всё. Симуляции (физика + огонь + структура)
     // отводим половину; отдельные всплески допустимы, средняя цена — нет.
-    if (res.avg > 8) {
+    // На общем раннере CI та же работа идёт втрое медленнее, и держать
+    // там игровой порог — значит ловить не регрессии, а соседей по железу.
+    const avgBudget = process.env.CI ? 24 : 8;
+    const p95Budget = process.env.CI ? 90 : 33;
+    if (res.avg > avgBudget) {
       throw new Error(`Симуляция не в бюджете кадра: средняя ${res.avg.toFixed(2)} мс`);
     }
-    if (res.p95 > 33) {
+    if (res.p95 > p95Budget) {
       throw new Error(`Просадка кадра при разрушении: p95 ${res.p95.toFixed(2)} мс`);
     }
     steps.push(
@@ -243,9 +256,22 @@ async function voxelCount(page) {
 }
 
 /** Playwright кладёт браузер в каталог с версией — ищем, а не гадаем. */
+/**
+ * Путь к Chromium.
+ *
+ * В песочнице разработки браузер лежит в /opt/pw-browsers и Playwright о
+ * нём не знает — приходится показывать пальцем. На CI он ставится обычным
+ * `playwright install` и находится сам, а каталога из песочницы там нет
+ * вовсе: не найдя его, возвращаем undefined и отдаём выбор Playwright.
+ */
 function findChromium() {
   const base = process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/pw-browsers';
-  const dirs = readdirSync(base).filter((d) => d.startsWith('chromium-'));
+  let dirs = [];
+  try {
+    dirs = readdirSync(base).filter((d) => d.startsWith('chromium-'));
+  } catch {
+    return undefined;
+  }
   for (const d of dirs) {
     const p = join(base, d, 'chrome-linux', 'chrome');
     if (existsSync(p)) return p;

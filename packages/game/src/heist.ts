@@ -16,7 +16,7 @@ import { LevelSource, TriggerDef, TriggerSystem } from './level.js';
 import { Mission, MissionResult } from './mission.js';
 import { Profile } from './progression.js';
 import { ChargeSystem, PlankBuilder, ToolContext, ToolUseResult, useTool } from './tool-use.js';
-import { NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
+import { CARGO_OFFSET, NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
 
 export interface HeistOptions {
   level: LevelSource;
@@ -31,6 +31,9 @@ export interface HeistEvents extends Record<string, unknown> {
   'heist:finished': MissionResult;
   'target:picked': { id: string };
   'target:dropped': { id: string };
+  /** Перерезан кабель сигнализации. */
+  'cable:cut': { count: number };
+  'target:stowed': { id: string; vehicle: string };
   'vehicle:entered': { id: string };
   'vehicle:exited': { id: string };
   'trigger:fired': { trigger: TriggerDef };
@@ -139,9 +142,105 @@ export class Heist {
       this.vehicles.set(spawn.id, veh);
     }
     this.bindTargets();
+    this.watchCables();
     this.character.teleport(this.level.spawn.position);
     if (!this.sandbox) this.mission.begin();
     this.events.emit('heist:started', { levelId: this.level.id });
+  }
+
+  /**
+   * Разрыв кабеля сигнализации поднимает тревогу.
+   *
+   * Кабель — обычный материал на стене: его видно, его можно обойти, а
+   * можно снести вместе со стеной. Второй разрыв уже ничего не меняет —
+   * сирена не включается дважды, и это проверяет тест.
+   */
+  private watchCables(): void {
+    if (this.sandbox) return;
+    this.sim.world.events.on('voxels:removed', (e) => {
+      if (!e.materials.has(Mat.Cable)) return;
+      if (this.mission.phase !== 'recon' && this.mission.phase !== 'briefing') return;
+      if (this.mission.triggerAlarm('cable')) {
+        this.events.emit('cable:cut', { count: e.materials.get(Mat.Cable) ?? 0 });
+      }
+    });
+  }
+
+  /**
+   * Груз в кузове едет с машиной. Разбитая машина груз роняет: цель
+   * остаётся лежать там, где её выбросило, а не исчезает вместе с
+   * техникой.
+   */
+  private moveCargo(): void {
+    for (const [id, veh] of this.vehicles) {
+      const stowed = this.mission.stowedIn(id);
+      if (stowed.length === 0) continue;
+      const at = add(veh.position, v3(CARGO_OFFSET.x, CARGO_OFFSET.y, CARGO_OFFSET.z));
+
+      if (veh.wrecked) {
+        for (const t of stowed) {
+          this.mission.unstow(t.spec.id, at);
+          veh.cargo.delete(t.spec.id);
+          this.placeTargetBody(t.spec.id, at, false);
+        }
+        continue;
+      }
+
+      this.mission.moveStowed(id, at);
+      for (const t of stowed) this.placeTargetBody(t.spec.id, at, true);
+    }
+  }
+
+  /** Поставить тело цели в точку мира. */
+  private placeTargetBody(id: string, at: Vec3, held: boolean): void {
+    const body = this.targetBodies.get(id);
+    if (!body) return;
+    body.transform.position = { ...at };
+    body.velocity = v3();
+    body.sleeping = held;
+    if (!held) body.wake();
+    this.sim.physics.sync(body);
+  }
+
+  /**
+   * Закинуть несомую цель в кузов техники в пределах вытянутой руки.
+   * Возвращает id техники или null.
+   */
+  stow(): string | null {
+    const carried = this.mission.carriedIds[0];
+    if (!carried) return null;
+    const from = this.playerPosition;
+    for (const [id, veh] of this.vehicles) {
+      if (veh.wrecked) continue;
+      const d = Math.hypot(
+        veh.position.x - from.x,
+        veh.position.y - from.y,
+        veh.position.z - from.z,
+      );
+      if (d > REACH + 1.6) continue;
+      const at = add(veh.position, v3(CARGO_OFFSET.x, CARGO_OFFSET.y, CARGO_OFFSET.z));
+      if (!this.mission.stow(carried, id, at)) continue;
+      veh.cargo.add(carried);
+      this.placeTargetBody(carried, at, true);
+      this.events.emit('target:stowed', { id: carried, vehicle: id });
+      return id;
+    }
+    return null;
+  }
+
+  /** Выгрузить всё из кузова машины на землю рядом. */
+  unloadCargo(vehicleId: string): number {
+    const veh = this.vehicles.get(vehicleId);
+    if (!veh) return 0;
+    const at = add(veh.position, v3(0, 0.4, 0));
+    let n = 0;
+    for (const t of this.mission.stowedIn(vehicleId)) {
+      if (!this.mission.unstow(t.spec.id, at)) continue;
+      veh.cargo.delete(t.spec.id);
+      this.placeTargetBody(t.spec.id, at, false);
+      n++;
+    }
+    return n;
   }
 
   private bindTargets(): void {
@@ -294,6 +393,8 @@ export class Heist {
       body.velocity = v3();
       body.sleeping = true;
     }
+
+    this.moveCargo();
 
     const pos = this.playerPosition;
     if (!this.sandbox) {

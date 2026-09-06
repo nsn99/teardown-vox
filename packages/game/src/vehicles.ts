@@ -164,6 +164,10 @@ export class Vehicle {
   wrecked = false;
   /** Сколько вокселей было в целом корпусе. */
   readonly initialVoxels: number;
+  /** Цели, лежащие в кузове. Едут вместе с машиной. */
+  readonly cargo = new Set<string>();
+  private flooded = 0;
+  private drowned = 0;
   private voxelSize: number;
   private waterLevel: number;
 
@@ -246,9 +250,31 @@ export class Vehicle {
     return this.position.y <= this.waterLevel + 0.05;
   }
 
+  /** Целость корпуса, 0..1. */
+  get hullIntegrity(): number {
+    return this.initialVoxels === 0 ? 0 : this.body.solidVoxels / this.initialVoxels;
+  }
+
+  /** Набранная вода, 0..1. Единица — утонул. */
+  get flooding(): number {
+    return this.flooded;
+  }
+
+  /**
+   * Насколько корпус ещё держит на воде.
+   *
+   * Пробоина топит не мгновенно: катер сначала садится, теряет ход и
+   * только потом уходит под воду. Это даёт игроку шанс догрести до
+   * причала — и делает дырку в борту решением, а не приговором.
+   */
+  get buoyancy(): number {
+    return clamp(1 - this.flooded, 0, 1);
+  }
+
   /** Может ли техника сейчас двигаться в этой среде. */
   canDrive(): boolean {
     if (this.wrecked) return false;
+    if (this.flooded >= 1) return false;
     if (this.spec.amphibious) return true;
     return this.spec.aquatic ? this.inWater : !this.inWater;
   }
@@ -256,12 +282,16 @@ export class Vehicle {
   update(sim: Simulation, input: VehicleInput, dt: number): void {
     if (this.wrecked) return;
 
+
     // Корпус развалился больше чем наполовину — техника мертва.
     if (this.body.solidVoxels < this.initialVoxels * 0.45) {
       this.wrecked = true;
       this.speed = 0;
       return;
     }
+
+    this.updateWater(dt);
+    if (this.wrecked) return;
 
     if (!this.canDrive()) {
       this.speed = approach(this.speed, 0, this.spec.brake * dt);
@@ -297,13 +327,45 @@ export class Vehicle {
     }
 
     // Катер держится на плаву, но не взлетает на воду с суши:
-    // выброшенный на берег он просто стоит.
+    // выброшенный на берег он просто стоит. Пробитый корпус садится тем
+    // глубже, чем больше набрал воды.
     if (this.spec.aquatic && this.position.y <= this.waterLevel) {
-      this.position.y = this.waterLevel;
+      this.position.y = this.waterLevel - this.flooded * SINK_DEPTH;
     }
     if (input.blade && this.spec.blade) this.dig(sim, dt);
 
     this.syncBody();
+  }
+
+  /**
+   * Вода в корпусе.
+   *
+   * У катера течь считается от пробоин: чем меньше осталось корпуса, тем
+   * быстрее набирается вода. У колёсной техники всё проще — утопил, значит
+   * заглохла: двигатель под водой не работает, и никакая целость корпуса
+   * этого не меняет.
+   */
+  private updateWater(dt: number): void {
+    if (this.spec.aquatic) {
+      const breach = Math.max(0, HULL_TIGHT - this.hullIntegrity);
+      if (breach > 0) this.flooded = clamp(this.flooded + breach * FLOOD_RATE * dt, 0, 1);
+      if (this.flooded >= 1) {
+        this.wrecked = true;
+        this.speed = 0;
+      }
+      return;
+    }
+
+    if (!this.spec.amphibious && this.position.y < this.waterLevel - DROWN_DEPTH) {
+      this.drowned += dt;
+      this.speed = approach(this.speed, 0, this.spec.brake * 2 * dt);
+      if (this.drowned > DROWN_SECONDS) {
+        this.wrecked = true;
+        this.speed = 0;
+      }
+    } else {
+      this.drowned = 0;
+    }
   }
 
   private syncBody(): void {
@@ -393,6 +455,20 @@ export class Vehicle {
     );
   }
 }
+
+/** Ниже этой целости корпуса катер начинает набирать воду. */
+const HULL_TIGHT = 0.92;
+/** Скорость затопления при полностью разбитом корпусе, доли в секунду. */
+const FLOOD_RATE = 1.4;
+/** Насколько глубоко садится полностью затопленный корпус, м. */
+const SINK_DEPTH = 1.2;
+/** Глубина, ниже которой колёсная техника считается утопленной, м. */
+const DROWN_DEPTH = 0.35;
+/** Сколько секунд под водой выдерживает двигатель. */
+const DROWN_SECONDS = 1.5;
+
+/** Точка кузова, где едет груз: над центром, ближе к корме. */
+export const CARGO_OFFSET = { x: 0, y: 0.9, z: -0.6 };
 
 function approach(current: number, target: number, maxDelta: number): number {
   const d = target - current;

@@ -6,8 +6,10 @@ import {
   SimplePhysics,
   VoxelShape,
   VoxelWorld,
+  DEBRIS_FIELD_TAG,
   capDebris,
   freeze,
+  mergeIntoField,
   v3,
 } from '@tvox/core';
 import { VS } from './helpers.js';
@@ -36,21 +38,55 @@ function worldOfDebris(count: number, distance = 40): VoxelWorld {
 }
 
 describe('потолок числа обломков', () => {
-  it('лишние обломки вмерзают в статику, а не исчезают', () => {
+  it('лишние обломки сливаются в общую свалку, а не исчезают', () => {
     const world = worldOfDebris(30);
     const before = world.totalSolidVoxels();
-    const bodies = world.bodies.size;
 
     const res = capDebris(world, { maxActive: 10, focus: v3() });
 
     expect(res.frozen).toBe(20);
-    // Ничего не удалено: воксели на месте, тела на месте.
+    // Ни один воксель не потерян — обломки просто сменили хозяина.
     expect(world.totalSolidVoxels()).toBe(before);
-    expect(world.bodies.size).toBe(bodies);
+    const field = [...world.bodies.values()].find((b) => b.tags.has(DEBRIS_FIELD_TAG));
+    expect(field).toBeDefined();
+    expect(field!.kind).toBe('static');
+    expect(field!.shapes).toHaveLength(20);
+    // И тел стало меньше: в этом весь смысл слияния.
+    expect(world.bodies.size).toBe(10 + 1);
+  });
+
+  it('без слияния обломок остаётся отдельным статическим телом', () => {
+    const world = worldOfDebris(12);
+    const before = world.bodies.size;
+
+    const res = capDebris(world, { maxActive: 4, focus: v3(), merge: false });
+
+    expect(res.frozen).toBe(8);
+    expect(world.bodies.size).toBe(before);
     for (const b of res.bodies) {
       expect(b.kind).toBe('static');
       expect(b.tags.has('frozen')).toBe(true);
     }
+  });
+
+  it('слитый обломок остаётся ровно там, где лежал', () => {
+    const world = new VoxelWorld();
+    const far = debris(40, 3, 7, 3);
+    world.addBody(far);
+    const shape = far.shapes[0];
+    const worldBefore = {
+      x: far.transform.position.x + shape.transform.position.x,
+      y: far.transform.position.y + shape.transform.position.y,
+      z: far.transform.position.z + shape.transform.position.z,
+    };
+
+    mergeIntoField(world, far);
+
+    const field = [...world.bodies.values()].find((b) => b.tags.has(DEBRIS_FIELD_TAG))!;
+    const moved = field.shapes[0];
+    expect(moved.transform.position.x).toBeCloseTo(worldBefore.x, 6);
+    expect(moved.transform.position.y).toBeCloseTo(worldBefore.y, 6);
+    expect(moved.transform.position.z).toBeCloseTo(worldBefore.z, 6);
   });
 
   it('первыми уходят мелкие и дальние', () => {
@@ -62,8 +98,15 @@ describe('потолок числа обломков', () => {
     world.addBody(far);
     world.addBody(bigFar);
 
-    capDebris(world, { maxActive: 2, focus: v3(), keepWithin: 5, keepAboveVoxels: 600 });
+    const res = capDebris(world, {
+      maxActive: 2,
+      focus: v3(),
+      keepWithin: 5,
+      keepAboveVoxels: 600,
+      merge: false,
+    });
 
+    expect(res.bodies).toEqual([far]);
     expect(far.kind).toBe('static');
     expect(near.kind).toBe('dynamic');
     expect(bigFar.kind).toBe('dynamic');

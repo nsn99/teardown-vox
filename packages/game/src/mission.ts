@@ -43,12 +43,14 @@ export interface MissionConfig {
   requirePlayerInZone?: boolean;
 }
 
-export type TargetState = 'idle' | 'carried' | 'delivered';
+export type TargetState = 'idle' | 'carried' | 'stowed' | 'delivered';
 
 export interface TargetRuntime {
   spec: TargetSpec;
   state: TargetState;
   position: Vec3;
+  /** id техники, в кузове которой лежит цель. */
+  carrier?: string;
 }
 
 export interface MissionResult {
@@ -73,6 +75,7 @@ export interface MissionEvents extends Record<string, unknown> {
   'target:taken': { target: TargetSpec };
   'target:dropped': { target: TargetSpec; position: Vec3 };
   'target:delivered': { target: TargetSpec };
+  'target:stowed': { target: TargetSpec; carrier: string };
   'mission:success': MissionResult;
   'mission:failed': MissionResult;
 }
@@ -159,6 +162,17 @@ export class Mission {
     return this._phase === 'success' || this._phase === 'failed';
   }
 
+  /** Все цели миссии с текущим состоянием. */
+  allTargets(): TargetRuntime[] {
+    return [...this.targets.values()].map((t) => ({ ...t }));
+  }
+
+  /** Состояние конкретной цели. */
+  target(id: string): TargetRuntime | null {
+    const t = this.targets.get(id);
+    return t ? { ...t } : null;
+  }
+
   get carriedIds(): readonly string[] {
     return this.carried;
   }
@@ -208,6 +222,54 @@ export class Mission {
     this._alarmTime = 0;
     this.events.emit('alarm:started', { seconds: this.config.alarmSeconds, trigger });
     return true;
+  }
+
+  /**
+   * Переложить цель из рук в кузов.
+   *
+   * Груз в кузове — это не «в руках»: руки освобождаются, цель едет с
+   * машиной и засчитывается, когда машина въезжает в зону. Выпав на
+   * ходу, она остаётся лежать в мире, а не исчезает.
+   */
+  stow(id: string, carrier: string, position: Vec3): boolean {
+    const t = this.targets.get(id);
+    if (!t) return false;
+    if (t.state !== 'carried' && t.state !== 'idle') return false;
+    t.state = 'stowed';
+    t.carrier = carrier;
+    t.position = { ...position };
+    this.carried = this.carried.filter((c) => c !== id);
+    this.events.emit('target:stowed', { target: t.spec, carrier });
+    return true;
+  }
+
+  /** Выгрузить цель из кузова на землю. */
+  unstow(id: string, position: Vec3): boolean {
+    const t = this.targets.get(id);
+    if (!t || t.state !== 'stowed') return false;
+    t.state = 'idle';
+    t.carrier = undefined;
+    t.position = { ...position };
+    this.events.emit('target:dropped', { target: t.spec, position: t.position });
+    return true;
+  }
+
+  /** Что лежит в кузове этой машины. */
+  stowedIn(carrier: string): TargetRuntime[] {
+    return [...this.targets.values()].filter(
+      (t) => t.state === 'stowed' && t.carrier === carrier,
+    );
+  }
+
+  /** Двигать груз вместе с машиной. */
+  moveStowed(carrier: string, position: Vec3): number {
+    let n = 0;
+    for (const t of this.targets.values()) {
+      if (t.state !== 'stowed' || t.carrier !== carrier) continue;
+      t.position = { ...position };
+      n++;
+    }
+    return n;
   }
 
   /** Положить цель. Она остаётся там, где её бросили. */

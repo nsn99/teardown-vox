@@ -1,4 +1,4 @@
-import { Vec3, distance, length, v3 } from './math.js';
+import { Vec3, add, distance, length, quatMultiply, rotateVec, v3 } from './math.js';
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 import { bodyCenter } from './physics.js';
@@ -14,6 +14,12 @@ export interface DebrisCapOptions {
   restOnly?: boolean;
   /** Ближе этого расстояния не трогаем вообще. */
   keepWithin?: number;
+  /**
+   * Сливать замороженные обломки в одно общее статическое тело.
+   * Без этого число тел в длинной сессии растёт линейно, даже если
+   * динамических среди них уже нет.
+   */
+  merge?: boolean;
 }
 
 const DEFAULTS = {
@@ -22,6 +28,7 @@ const DEFAULTS = {
   keepAboveVoxels: 600,
   restOnly: true,
   keepWithin: 12,
+  merge: true,
 } satisfies Required<DebrisCapOptions>;
 
 export interface DebrisCapResult {
@@ -71,11 +78,67 @@ export function capDebris(world: VoxelWorld, opts: DebrisCapOptions = {}): Debri
   const frozenBodies: Body[] = [];
   for (const c of candidates) {
     if (frozenBodies.length >= excess) break;
-    freeze(c.body);
+    if (cfg.merge) mergeIntoField(world, c.body);
+    else freeze(c.body);
     frozenBodies.push(c.body);
   }
 
   return { frozen: frozenBodies.length, active: active - frozenBodies.length, bodies: frozenBodies };
+}
+
+/** Тег общего тела, в которое сливаются замороженные обломки. */
+export const DEBRIS_FIELD_TAG = 'debris-field';
+
+/** Найти или создать общую свалку обломков. */
+export function debrisField(world: VoxelWorld): Body {
+  for (const b of world.bodies.values()) {
+    if (!b.destroyed && b.tags.has(DEBRIS_FIELD_TAG)) return b;
+  }
+  const field = new Body({
+    kind: 'static',
+    shapes: [],
+    name: 'обломки',
+    tags: [DEBRIS_FIELD_TAG],
+    passive: true,
+  });
+  return world.addBody(field);
+}
+
+/**
+ * Перенести формы обломка в общую свалку и убрать его тело.
+ *
+ * Воксели остаются ровно там, где лежали: трансформ формы пересчитывается
+ * в систему свалки. Смысл — плато по числу тел: без слияния длинная
+ * сессия копит тысячи статических тел, и каждый кадр начинает с обхода
+ * этого списка.
+ */
+export function mergeIntoField(world: VoxelWorld, body: Body): Body {
+  const field = debrisField(world);
+  // Свалка живёт в мировых осях без поворота — иначе пришлось бы
+  // разворачивать в неё каждую форму, а смысла в этом никакого.
+  const fp = field.transform.position;
+
+  for (const shape of body.shapes) {
+    if (shape.solidVoxels === 0) continue;
+    // Мировой трансформ формы = трансформ тела ∘ трансформ формы,
+    // и его надо выразить относительно свалки.
+    const worldPos = add(body.transform.position, rotateVec(body.transform.rotation, shape.transform.position));
+    const worldRot = quatMultiply(body.transform.rotation, shape.transform.rotation);
+    shape.transform = {
+      position: v3(worldPos.x - fp.x, worldPos.y - fp.y, worldPos.z - fp.z),
+      rotation: worldRot,
+    };
+    shape.structural = false;
+    shape.structureScanned = true;
+    shape.clearStructureDirty();
+    field.addShape(shape);
+  }
+
+  body.shapes = [];
+  world.removeBody(body);
+  world.reindex();
+  field.collidersDirty = true;
+  return field;
 }
 
 /** Вмораживает обломок в статическую геометрию, не двигая его с места. */

@@ -9,8 +9,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -24,16 +24,20 @@ jobs:
       - name: Сборка
         run: npm run build
       - name: Дымовой прогон в браузере
+        env:
+          # Ставим браузер туда, где его найдёт сам Playwright: путь из
+          # песочницы разработки на раннере не существует.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: ''
         run: |
           npx playwright install --with-deps chromium
           node tools/smoke/run.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: shots
           path: shots/
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: coverage

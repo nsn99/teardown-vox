@@ -99,6 +99,34 @@ function cutOpening(shape: VoxelShape, b: BuildBox): void {
   fill(shape, b, Mat.Air);
 }
 
+/**
+ * Кабель сигнализации: линия толщиной в воксель по осям.
+ *
+ * Кабель нарочно виден и нарочно проложен по стенам и балкам, а не спрятан
+ * в бетон: смысл в том, чтобы игрок мог его заметить и обойти, а не в том,
+ * чтобы наказать за незнание карты.
+ */
+function cable(s: VoxelShape, pts: Array<[number, number, number]>): void {
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0, z0] = pts[i - 1];
+    const [x1, y1, z1] = pts[i];
+    const sx = Math.sign(x1 - x0);
+    const sy = Math.sign(y1 - y0);
+    const sz = Math.sign(z1 - z0);
+    let x = x0;
+    let y = y0;
+    let z = z0;
+    let guard = 0;
+    for (;;) {
+      s.set(x, y, z, Mat.Cable);
+      if ((x === x1 && y === y1 && z === z1) || guard++ > 4000) break;
+      if (x !== x1) x += sx;
+      else if (y !== y1) y += sy;
+      else z += sz;
+    }
+  }
+}
+
 function makeShape(
   sx: number,
   sy: number,
@@ -169,6 +197,15 @@ function buildWarehouse(): VoxelShape {
   fill(s, box(M(14), 3, M(10), M(19), M(5), M(15)), Mat.Concrete);
   fill(s, box(M(14) + 3, 3, M(10) + 3, M(19) - 1, M(5) - 2, M(15) - 1), Mat.Air);
   cutOpening(s, box(M(14), 3, M(12), M(14) + 3, M(4.5), M(13.5)));
+
+  // Кабель от кладовой: по верху передней стены, дальше по балке и вниз
+  // на крышу кладовой. Пробьёшь стену на этой высоте — сирена.
+  cable(s, [
+    [M(2), M(7.3), 3],
+    [M(19), M(7.3), 3],
+    [M(19), M(7.3), M(12)],
+    [M(19), M(5.1), M(12)],
+  ]);
   return s;
 }
 
@@ -193,6 +230,13 @@ function buildOffice(): VoxelShape {
   // Перемычка стальная: бетонная такого пролёта не держит, а сталь держит —
   // и её можно перерезать лампой, чтобы уронить стену над входом.
   fill(s, box(M(3.8), M(2.2), 0, M(6.2), M(3.2), 2), Mat.Metal);
+
+  // Кабель второго этажа: по стене вдоль витража и вниз к вводу.
+  cable(s, [
+    [M(1), M(3.4), 2],
+    [M(9), M(3.4), 2],
+    [M(9), M(0.8), 2],
+  ]);
   return s;
 }
 

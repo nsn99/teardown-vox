@@ -201,3 +201,73 @@ describe('уничтожение техники', () => {
     expect(v.position.z).toBe(z);
   });
 });
+
+describe('вода', () => {
+  /** Катер на воде: уровень воды на нуле, катер на нём. */
+  function boat(sim: Simulation) {
+    const v = new Vehicle('boat', { position: v3(0, 0, 0), voxelSize: VS, waterLevel: 0 });
+    v.spawn(sim);
+    return v;
+  }
+
+  it('целый корпус воду не набирает', () => {
+    const sim = emptySim();
+    const v = boat(sim);
+    run(v, sim, drive({ throttle: 1 }), 3);
+    expect(v.flooding).toBe(0);
+    expect(v.buoyancy).toBe(1);
+    expect(v.wrecked).toBe(false);
+  });
+
+  it('пробитый корпус набирает воду, садится и теряет ход', () => {
+    const sim = emptySim();
+    const v = boat(sim);
+    // Вырезаем четверть корпуса: это уже пробоина, а не царапина.
+    const shape = v.body.shapes[0];
+    const cut = Math.floor(shape.sx * 0.35);
+    shape.fill({ x0: 0, x1: cut }, Mat.Air);
+
+    expect(v.hullIntegrity).toBeLessThan(0.92);
+    run(v, sim, drive({ throttle: 1 }), 6);
+
+    expect(v.flooding).toBeGreaterThan(0);
+    expect(v.buoyancy).toBeLessThan(1);
+    // Осевший катер сидит ниже уровня воды.
+    expect(v.position.y).toBeLessThan(0);
+  });
+
+  it('полностью затопленный катер тонет и глохнет', () => {
+    const sim = emptySim();
+    const v = boat(sim);
+    const shape = v.body.shapes[0];
+    shape.fill({ x0: 0, x1: Math.floor(shape.sx * 0.4) }, Mat.Air);
+
+    run(v, sim, drive({ throttle: 1 }), 20);
+
+    expect(v.flooding).toBe(1);
+    expect(v.canDrive()).toBe(false);
+    expect(v.wrecked).toBe(true);
+  });
+
+  it('машина в воде глохнет насовсем', () => {
+    const sim = emptySim();
+    const car = new Vehicle('car', { position: v3(0, -1, 0), voxelSize: VS, waterLevel: 0 });
+    car.spawn(sim);
+
+    expect(car.canDrive()).toBe(false);
+    run(car, sim, drive({ throttle: 1 }), 3);
+
+    expect(car.wrecked).toBe(true);
+    // И на суше уже не заводится: двигатель утоплен.
+    car.position = v3(0, 2, 0);
+    expect(car.canDrive()).toBe(false);
+  });
+
+  it('машина на берегу воду не набирает', () => {
+    const sim = emptySim();
+    const car = new Vehicle('car', { position: v3(0, 0.5, 0), voxelSize: VS, waterLevel: 0 });
+    car.spawn(sim);
+    run(car, sim, drive({ throttle: 1 }), 3);
+    expect(car.wrecked).toBe(false);
+  });
+});

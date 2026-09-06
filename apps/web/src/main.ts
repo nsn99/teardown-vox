@@ -7,7 +7,7 @@ import {
   portLevel,
   toolBySlot,
 } from '@tvox/game';
-import { RapierPhysics, carve, clamp, explode, stepStructure } from '@tvox/core';
+import { RapierPhysics, add, carve, clamp, explode, stepStructure, v3 } from '@tvox/core';
 import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -180,8 +180,26 @@ function handleActions(h: Heist): void {
   if (wheel !== 0) h.inventory.cycle(wheel > 0 ? 1 : -1);
 
   if (input.take('KeyE')) {
-    const id = h.interact();
-    if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
+    // Стоишь у машины с целью в руках — грузишь в кузов; иначе обычное
+    // «взять/положить». Отдельную кнопку заводить незачем: действие одно
+    // и то же, разница только в том, что рядом.
+    const stowed = h.stow();
+    if (stowed) {
+      hud.message(`В кузов: ${h.vehicles.get(stowed)?.spec.name ?? 'техника'}`, 1.5);
+    } else {
+      const id = h.interact();
+      if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
+    }
+  }
+
+  if (input.take('KeyG') && h.drivingId) {
+    const n = h.unloadCargo(h.drivingId);
+    if (n > 0) hud.message(`Выгружено: ${n}`, 1.5);
+  }
+
+  const veh = h.driving;
+  if (veh && veh.inWater && Math.abs(veh.speed) > 1.5) {
+    particles.emitSplash(add(veh.position, v3(0, 0.1, 0)), 3);
   }
 
   if (input.take('KeyF')) {
