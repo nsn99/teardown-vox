@@ -29,6 +29,11 @@ export interface ProfileEvents extends Record<string, unknown> {
 
 export const PROFILE_VERSION = 1;
 
+/** Вход конструктора: ступени можно задать частично. */
+export interface ProfileInit extends Partial<Omit<ProfileData, 'tiers'>> {
+  tiers?: Partial<Record<ToolId, number>>;
+}
+
 export type UpgradeFailure = 'maxed' | 'insufficient-funds';
 
 export type UpgradeOutcome =
@@ -49,7 +54,7 @@ export class Profile {
   readonly events = new EventBus<ProfileEvents>();
   private data: ProfileData;
 
-  constructor(data?: Partial<ProfileData>) {
+  constructor(data?: ProfileInit) {
     this.data = {
       version: PROFILE_VERSION,
       money: data?.money ?? 0,

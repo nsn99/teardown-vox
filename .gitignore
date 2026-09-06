@@ -5,3 +5,5 @@ coverage/
 *.local
 .vite/
 apps/web/public/assets/generated/
+shots/
+*.tsbuildinfo

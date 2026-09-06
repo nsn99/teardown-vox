@@ -14,7 +14,11 @@ export interface SimulationOptions {
   maxStepsPerFrame?: number;
   /** Структурный анализ реже физики: он дорогой, а обвал не обязан быть мгновенным. */
   structureEveryNSteps?: number;
-  backend?: PhysicsBackend;
+  /**
+   * Готовый бэкенд или фабрика по миру. Фабрика удобнее: мир создаётся
+   * внутри симуляции, а бэкенду он нужен на конструирование.
+   */
+  backend?: PhysicsBackend | ((world: VoxelWorld) => PhysicsBackend);
 }
 
 export interface SimStepStats {
@@ -31,9 +35,10 @@ export interface SimStepStats {
  */
 export class Simulation {
   readonly world: VoxelWorld;
-  readonly physics: PhysicsBackend;
   readonly fire: FireSystem;
   readonly fixedStep: number;
+
+  private backend: PhysicsBackend;
 
   private accumulator = 0;
   private stepIndex = 0;
@@ -43,12 +48,33 @@ export class Simulation {
 
   constructor(opts: SimulationOptions = {}) {
     this.world = new VoxelWorld(opts.world);
-    this.physics = opts.backend ?? new SimplePhysics(this.world, opts.physics);
+    this.backend =
+      typeof opts.backend === 'function'
+        ? opts.backend(this.world)
+        : (opts.backend ?? new SimplePhysics(this.world, opts.physics));
     this.fire = new FireSystem(opts.fire);
     this.fixedStep = opts.fixedStep ?? 1 / 60;
     this.maxSteps = opts.maxStepsPerFrame ?? 5;
     this.structureEvery = opts.structureEveryNSteps ?? 2;
     this.structureOpts = opts.structure ?? {};
+  }
+
+  get physics(): PhysicsBackend {
+    return this.backend;
+  }
+
+  /**
+   * Подменить физический бэкенд. Rapier инициализируется асинхронно
+   * (WASM), поэтому игра стартует на headless-дублёре и переключается,
+   * как только модуль загрузился.
+   */
+  setPhysics(backend: PhysicsBackend, disposeOld = true): void {
+    if (backend === this.backend) return;
+    if (disposeOld) this.backend.dispose();
+    this.backend = backend;
+    for (const body of this.world.bodies.values()) {
+      if (!body.destroyed) backend.sync(body);
+    }
   }
 
   /** Продвинуть симуляцию на dt секунд реального времени. */
@@ -66,13 +92,13 @@ export class Simulation {
       steps++;
       this.stepIndex++;
 
-      this.physics.step(this.fixedStep);
+      this.backend.step(this.fixedStep);
       burning = this.fire.step(this.world, this.fixedStep).burning;
 
       if (this.stepIndex % this.structureEvery === 0) {
         const res = stepStructure(this.world, this.structureOpts);
         structure = mergeStructure(structure, res);
-        for (const f of res.fragments) this.physics.sync(f.body);
+        for (const f of res.fragments) this.backend.sync(f.body);
       }
     }
 
@@ -88,7 +114,7 @@ export class Simulation {
   /** Немедленно посчитать структурную целостность (после взрыва). */
   settle(): StructureResult {
     const res = stepStructure(this.world, this.structureOpts);
-    for (const f of res.fragments) this.physics.sync(f.body);
+    for (const f of res.fragments) this.backend.sync(f.body);
     return res;
   }
 
@@ -102,7 +128,7 @@ export class Simulation {
   }
 
   dispose(): void {
-    this.physics.dispose();
+    this.backend.dispose();
   }
 }
 

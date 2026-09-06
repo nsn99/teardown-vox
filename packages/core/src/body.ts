@@ -11,6 +11,11 @@ export interface BodyOptions {
   tags?: string[];
   /** Тело не участвует в разрушении и структурном анализе (напр. вода). */
   passive?: boolean;
+  /**
+   * Тело движется, но управляется извне (техника). Солвер его не
+   * интегрирует и не толкает: оно толкает само.
+   */
+  kinematic?: boolean;
 }
 
 let nextBodyId = 1;
@@ -33,6 +38,8 @@ export class Body {
   name: string;
   tags: Set<string>;
   passive: boolean;
+  /** Кинематическое: позицию задаёт игровой код, а не солвер. */
+  kinematic: boolean;
 
   velocity: Vec3 = v3();
   angularVelocity: Vec3 = v3();
@@ -55,6 +62,7 @@ export class Body {
     this.name = opts.name ?? `body${this.id}`;
     this.tags = new Set(opts.tags ?? []);
     this.passive = opts.passive ?? false;
+    this.kinematic = opts.kinematic ?? false;
   }
 
   addShape(shape: VoxelShape): VoxelShape {

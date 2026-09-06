@@ -10,6 +10,7 @@ export function staticBody(shapes: VoxelShape[], name = 'level'): Body {
   return new Body({ kind: 'static', shapes, name, tags: ['level'] });
 }
 
+
 export function worldWith(...shapes: VoxelShape[]): { world: VoxelWorld; body: Body } {
   const world = new VoxelWorld();
   const body = staticBody(shapes);

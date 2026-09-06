@@ -27,6 +27,8 @@ export interface SimplePhysicsOptions {
   /** Урон от удара масштабируется этим коэффициентом. */
   impactDamageScale?: number;
   maxSpeed?: number;
+  /** Материалы, которые удар не разрушает (цели миссии). */
+  protectedMaterials?: ReadonlySet<number>;
 }
 
 const DEFAULTS = {
@@ -37,6 +39,7 @@ const DEFAULTS = {
   sleepVelocity: 0.08,
   impactDamageScale: 0.0016,
   maxSpeed: 120,
+  protectedMaterials: new Set<number>(),
 } satisfies Required<SimplePhysicsOptions>;
 
 /**
@@ -101,6 +104,8 @@ export class SimplePhysics implements PhysicsBackend {
         continue;
       }
       if (body.sleeping) continue;
+      // Кинематику двигает игровой код: гравитация ей не указ.
+      if (body.kinematic) continue;
 
       const prev = { ...body.velocity };
       body.velocity = add(body.velocity, scale(g, dt));
@@ -183,6 +188,7 @@ export class SimplePhysics implements PhysicsBackend {
         instant: true,
         falloff: 'quadratic',
         cause: 'impact',
+        protect: this.cfg.protectedMaterials,
       },
     );
   }

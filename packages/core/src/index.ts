@@ -10,4 +10,5 @@ export * from './structure.js';
 export * from './fire.js';
 export * from './collider.js';
 export * from './physics.js';
+export * from './physics-rapier.js';
 export * from './simulation.js';

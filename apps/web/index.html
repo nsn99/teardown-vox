@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Тирдаун — порт</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d141b'/%3E%3Cpath d='M6 20h8v6H6zM18 12h8v14h-8z' fill='%23ff8a3d'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="crosshair" aria-hidden="true"></div>
+
+    <div id="hud" hidden>
+      <div id="alarm" class="alarm">
+        <span class="alarm__label">ТРЕВОГА</span>
+        <span id="alarm-time" class="alarm__time">60.0</span>
+      </div>
+
+      <ul id="targets" class="targets"></ul>
+
+      <div class="bottom">
+        <div id="tool" class="tool">
+          <span id="tool-name" class="tool__name">Кувалда</span>
+          <span id="tool-tier" class="tool__tier">ур. 1</span>
+          <span id="tool-ammo" class="tool__ammo">∞</span>
+        </div>
+        <ul id="belt" class="belt"></ul>
+      </div>
+
+      <div id="hint" class="hint"></div>
+      <div id="stats" class="stats"></div>
+    </div>
+
+    <div id="menu" class="menu">
+      <div class="menu__panel">
+        <h1 class="menu__title">Тирдаун</h1>
+        <p class="menu__brief" id="menu-brief"></p>
+
+        <div class="menu__row">
+          <span>Наличные</span>
+          <b id="menu-money">0 ₽</b>
+        </div>
+
+        <div id="shop" class="shop"></div>
+
+        <div class="menu__buttons">
+          <button id="btn-mission" class="btn btn--primary">Начать ограбление</button>
+          <button id="btn-sandbox" class="btn">Песочница</button>
+        </div>
+
+        <details class="menu__help">
+          <summary>Управление</summary>
+          <table>
+            <tr><td>WASD</td><td>движение</td></tr>
+            <tr><td>Shift / Ctrl</td><td>бег / присед</td></tr>
+            <tr><td>Пробел</td><td>прыжок, в воде — всплытие</td></tr>
+            <tr><td>ЛКМ</td><td>применить инструмент</td></tr>
+            <tr><td>ПКМ</td><td>детонатор</td></tr>
+            <tr><td>E</td><td>взять / положить цель</td></tr>
+            <tr><td>F</td><td>сесть в технику / выйти</td></tr>
+            <tr><td>1…7</td><td>выбор инструмента</td></tr>
+            <tr><td>Колесо</td><td>листать инструменты</td></tr>
+            <tr><td>R</td><td>перезапуск</td></tr>
+            <tr><td>Esc</td><td>меню</td></tr>
+          </table>
+        </details>
+      </div>
+    </div>
+
+    <div id="result" class="result" hidden>
+      <div class="result__panel">
+        <h2 id="result-title"></h2>
+        <p id="result-text"></p>
+        <button id="btn-again" class="btn btn--primary">Ещё раз</button>
+        <button id="btn-hub" class="btn">В хаб</button>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

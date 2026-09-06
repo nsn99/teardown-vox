@@ -20,11 +20,15 @@
     "typecheck": "tsc -b --force",
     "lint": "eslint . --ext .ts,.tsx",
     "issues:plan": "node tools/issues/sync-issues.mjs --dry-run",
-    "issues:sync": "node tools/issues/sync-issues.mjs"
+    "issues:sync": "node tools/issues/sync-issues.mjs",
+    "smoke": "npm run build --workspace apps/web && node tools/smoke/run.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/three": "^0.171.0",
     "@vitest/coverage-v8": "^2.1.8",
+    "canvas": "^3.2.3",
+    "playwright": "^1.63.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8",

@@ -183,7 +183,17 @@ export class Vehicle {
       grounded: false,
       name: `${kind}-hull`,
     });
+    // Корпус полый: сплошной металлический параллелепипед размером
+    // с пикап весил бы сто тонн и продавливал набережную одним фактом
+    // своего существования.
+    const wall = 2;
     shape.fill({}, this.spec.material);
+    shape.fill(
+      { x0: wall, x1: x - wall, y0: wall, y1: y - wall, z0: wall, z1: z - wall },
+      Mat.Air,
+    );
+    // Рама по низу: без неё корпус разваливается от первого же удара.
+    shape.fill({ y0: 0, y1: wall + 1 }, this.spec.material);
     // Кабина из стекла — узнаваемый силуэт и повод для дробовика.
     shape.fill(
       { x0: Math.floor(x * 0.45), x1: Math.floor(x * 0.75), y0: y - 4, y1: y, z0: 2, z1: z - 2 },
@@ -200,6 +210,7 @@ export class Vehicle {
       shapes: [shape],
       name: this.spec.name,
       tags: ['vehicle', kind],
+      kinematic: true,
       transform: { position: { ...this.position }, rotation: quatFromEulerYXZ(opts.yaw ?? 0, 0) },
     });
     this.body.transform.rotation = this.orientation;

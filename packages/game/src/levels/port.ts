@@ -426,7 +426,9 @@ export const portLevel: LevelSource = {
   brief: PORT_MISSION.brief,
   voxelSize: VOXEL,
   waterLevel: WATER_LEVEL,
-  spawn: { position: v3(45, 0.05, 33), yaw: Math.PI },
+  // Старт у ворот, лицом внутрь объекта: игрок сразу видит склад, офис
+  // и кран, то есть всё, что ему предстоит планировать.
+  spawn: { position: v3(45, 0.05, 33), yaw: 0 },
   triggers: PORT_TRIGGERS,
   vehicles: PORT_VEHICLES,
   mission: PORT_MISSION,

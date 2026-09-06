@@ -80,7 +80,14 @@ export class Heist {
     this.level = opts.level;
     this.sandbox = opts.sandbox ?? false;
     this.profile = opts.profile ?? new Profile();
-    this.sim = new Simulation(opts.simulation);
+    this.sim = new Simulation({
+      ...opts.simulation,
+      physics: {
+        // Цели миссии не должна разрушать даже падающая на них плита.
+        protectedMaterials: this.sandbox ? EMPTY_SET : PROTECTED,
+        ...opts.simulation?.physics,
+      },
+    });
     this.mission = new Mission(opts.level.mission);
     this.triggers = new TriggerSystem(opts.level.triggers);
     this.inventory = new Inventory({
@@ -146,7 +153,7 @@ export class Heist {
   }
 
   /** Множество материалов, которые инструменты не разрушают. */
-  private protectedMaterials(): ReadonlySet<number> {
+  protectedMaterials(): ReadonlySet<number> {
     return this.sandbox ? EMPTY_SET : PROTECTED;
   }
 
