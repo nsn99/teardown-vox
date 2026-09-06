@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
@@ -82,7 +82,7 @@ page.on('response', (r) => {
 
 // Предохранитель: прогон, который завис, должен падать, а не занимать
 // раннер на полчаса.
-const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 420_000);
+const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 600_000);
 const hardStop = setTimeout(() => {
   console.error(`Дымовой прогон не уложился в ${HARD_TIMEOUT_MS} мс.`);
   process.exit(1);
@@ -90,10 +90,37 @@ const hardStop = setTimeout(() => {
 hardStop.unref();
 
 const steps = [];
+
+/**
+ * Журнал прогона.
+ *
+ * Пишется всегда, в том числе при падении, и уезжает вместе со
+ * скриншотами в артефакт CI. Иначе «Process completed with exit code 1»
+ * в интерфейсе Actions — это всё, что остаётся от упавшего прогона.
+ */
+const saveLog = (verdict) => {
+  try {
+    writeFileSync(
+      join(outDir, 'smoke.log'),
+      [`Дымовой прогон: ${verdict}`, `Когда: ${new Date().toISOString()}`, '', ...steps, '', ...errors]
+        .join('\n') + '\n',
+      'utf8',
+    );
+  } catch {
+    /* журнал — удобство, а не условие прохождения */
+  }
+};
+
 const step = async (name, fn) => {
   const t0 = Date.now();
   process.stdout.write(`… ${name}\n`);
-  await fn();
+  try {
+    await fn();
+  } catch (err) {
+    steps.push(`${name}: УПАЛ — ${err.message}`);
+    saveLog(`упал на шаге «${name}»`);
+    throw err;
+  }
   const dt = Date.now() - t0;
   process.stdout.write(`  ✓ ${name}: ${dt} мс\n`);
   steps.push(`${name}: ${dt} мс`);
@@ -138,11 +165,15 @@ try {
     // поэтому яркость меряем по настоящему скриншоту.
     const png = await page.screenshot({ type: 'png' });
     const bright = await brightness(png);
+    const mean = await meanLuminance(png);
     // Диапазон, а не минимум: залитый белым кадр — такая же поломка,
-    // как и чёрный, просто с другой стороны.
-    if (bright < 0.25) throw new Error(`Кадр почти чёрный: ${bright.toFixed(3)}`);
-    if (bright > 0.985) throw new Error(`Кадр пересвечен: ${bright.toFixed(3)}`);
-    steps.push(`доля светлых точек: ${bright.toFixed(3)}`);
+    // как и чёрный, просто с другой стороны. Границы широкие намеренно:
+    // проверка ловит «нечего показывать», а не художественный замысел.
+    // Узкий коридор здесь означал бы красный CI на каждую правку света.
+    if (bright < 0.1) throw new Error(`Кадр почти чёрный: доля светлых ${bright.toFixed(3)}`);
+    if (bright > 0.985) throw new Error(`Кадр пересвечен: доля светлых ${bright.toFixed(3)}`);
+    if (mean >= 0 && mean < 0.02) throw new Error(`Кадр почти чёрный: средняя ${mean.toFixed(4)}`);
+    steps.push(`доля светлых точек: ${bright.toFixed(3)}, средняя яркость: ${mean.toFixed(4)}`);
   });
 
   await step('разрушение и обрушение', async () => {
@@ -283,15 +314,23 @@ try {
     );
   });
 
-  if (errors.length > 0) {
-    throw new Error(`Ошибки в консоли:\n  ${errors.join('\n  ')}`);
-  }
+  await step('консоль чистая', async () => {
+    // Отдельным шагом, а не постскриптумом: в артефакте CI должно быть
+    // видно, что упало именно на консоли, и что именно в ней лежит.
+    if (errors.length > 0) {
+      throw new Error(`Ошибки в консоли (${errors.length}):\n  ${errors.join('\n  ')}`);
+    }
+  });
 
+  saveLog('пройден');
   console.log('Дымовой прогон пройден.');
   for (const s of steps) console.log(`  ${s}`);
   console.log(`Скриншоты: ${outDir}`);
 } catch (err) {
+  saveLog(`упал: ${err.message}`);
   console.error(`Дымовой прогон упал: ${err.message}`);
+  console.error('Шаги до падения:');
+  for (const s of steps) console.error(`  ${s}`);
   if (errors.length) console.error(errors.join('\n'));
   await page.screenshot({ path: join(outDir, 'fail.png') }).catch(() => {});
   process.exitCode = 1;

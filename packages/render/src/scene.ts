@@ -282,8 +282,23 @@ export class VoxelRenderer {
     base.onBeforeCompile = (shader) => {
       shader.uniforms.uSkyFloor = this.skyFloor;
       shader.uniforms.uVoxel = this.voxelUniform;
-      shader.vertexShader = shader.vertexShader
-        .replace(
+
+      // Правка чужого шейдера — это ставка на то, что имена кусков не
+      // поменялись. Ставку надо проверять: если THREE переименует хоть
+      // один include, лучше отрисовать сцену обычным материалом, чем
+      // собрать шейдер с дырой и получить чёрный экран у игрока.
+      const missing: string[] = [];
+      const patch = (src: string, token: string, text: string): string => {
+        if (!src.includes(token)) {
+          missing.push(token);
+          return src;
+        }
+        return src.replace(token, text);
+      };
+
+      const vertex = patch(
+        patch(
+          shader.vertexShader,
           '#include <common>',
           `#include <common>
            attribute vec3 aProps;
@@ -291,58 +306,71 @@ export class VoxelRenderer {
            varying vec3 vProps;
            varying float vSky;
            varying vec3 vVoxelPos;`,
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-           vProps = aProps;
-           vSky = aSky;
-           vVoxelPos = transformed;`,
-        );
+        ),
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         vProps = aProps;
+         vSky = aSky;
+         vVoxelPos = transformed;`,
+      );
 
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-           uniform float uSkyFloor;
-           uniform float uVoxel;
-           varying vec3 vProps;
-           varying float vSky;
-           varying vec3 vVoxelPos;
-           float tvoxHash( vec3 p ) {
-             return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
-           }`,
-        )
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-           // Зерно по вокселям, а не по грани. Жадная склейка отдаёт
-           // набережную одним квадом на сорок метров, и без этого она
-           // выглядит листом бумаги, а не бетоном. Считать в пикселе
-           // дешевле, чем ломать склейку ради разноцветных вершин.
-           float grain = tvoxHash( floor( vVoxelPos / uVoxel + 0.5 ) );
-           diffuseColor.rgb *= mix( 0.90, 1.07, grain );
-`,
-        )
-        .replace(
-          '#include <roughnessmap_fragment>',
-          'float roughnessFactor = clamp( vProps.y, 0.035, 1.0 );',
-        )
-        .replace(
-          '#include <metalnessmap_fragment>',
-          'float metalnessFactor = clamp( vProps.x, 0.0, 1.0 );',
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-           totalEmissiveRadiance += diffuseColor.rgb * vProps.z * 2.2;`,
-        )
-        .replace(
-          '#include <lights_fragment_begin>',
-          `#include <lights_fragment_begin>
-           irradiance *= mix( uSkyFloor, 1.0, vSky );`,
+      let fragment = patch(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>
+         uniform float uSkyFloor;
+         uniform float uVoxel;
+         varying vec3 vProps;
+         varying float vSky;
+         varying vec3 vVoxelPos;
+         float tvoxHash( vec3 p ) {
+           return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+         }`,
+      );
+      fragment = patch(
+        fragment,
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         // Зерно по вокселям, а не по грани. Жадная склейка отдаёт
+         // набережную одним квадом на сорок метров, и без этого она
+         // выглядит листом бумаги, а не бетоном. Считать в пикселе
+         // дешевле, чем ломать склейку ради разноцветных вершин.
+         float grain = tvoxHash( floor( vVoxelPos / uVoxel + 0.5 ) );
+         diffuseColor.rgb *= mix( 0.90, 1.07, grain );`,
+      );
+      fragment = patch(
+        fragment,
+        '#include <roughnessmap_fragment>',
+        'float roughnessFactor = clamp( vProps.y, 0.035, 1.0 );',
+      );
+      fragment = patch(
+        fragment,
+        '#include <metalnessmap_fragment>',
+        'float metalnessFactor = clamp( vProps.x, 0.0, 1.0 );',
+      );
+      fragment = patch(
+        fragment,
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+         totalEmissiveRadiance += diffuseColor.rgb * vProps.z * 2.2;`,
+      );
+      fragment = patch(
+        fragment,
+        '#include <lights_fragment_begin>',
+        `#include <lights_fragment_begin>
+         irradiance *= mix( uSkyFloor, 1.0, vSky );`,
+      );
+
+      if (missing.length > 0) {
+        console.warn(
+          `Шейдер THREE изменился, воксельные правки отключены: ${missing.join(', ')}`,
         );
+        return;
+      }
+      shader.vertexShader = vertex;
+      shader.fragmentShader = fragment;
     };
+
     // Ключ кэша программ обязан отличаться от стандартного: иначе THREE
     // подсунет сюда уже собранный шейдер без наших атрибутов.
     base.customProgramCacheKey = () => 'tvox-voxel';
@@ -781,12 +809,12 @@ export class VoxelRenderer {
     this.stats.triangles = tris;
 
     // Неподвижные лампы пересчитывают тень только когда мир изменился —
-    // и не чаще, чем раз в треть секунды. Во время долгого обрушения
+    // и не чаще раза в секунду. Во время долгого обрушения
     // ремеш идёт каждый кадр, и обновлять по нему карты теней значит
     // рисовать сцену лишний раз на каждую лампу.
     if (this.stats.remeshed > 0 && this.staticShadows.length > 0) {
       const now = performance.now();
-      if (now - this.lastShadowRefresh > 330) {
+      if (now - this.lastShadowRefresh > 900) {
         this.lastShadowRefresh = now;
         for (const l of this.staticShadows) l.shadow.needsUpdate = true;
       }
