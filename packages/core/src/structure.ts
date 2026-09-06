@@ -1,6 +1,6 @@
 import { Vec3, add, rotateVec, v3 } from './math.js';
-import { Mat, carriesLoad, material, voxelMass } from './materials.js';
-import { VoxelShape } from './voxel-shape.js';
+import { MATERIALS, Mat, carriesLoad, material, voxelMass } from './materials.js';
+import { CHUNK_SIZE, VoxelShape } from './voxel-shape.js';
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 
@@ -17,6 +17,13 @@ export interface StructureOptions {
   loadScale?: number;
   /** Считать напряжения (дорого). Для чисто связностной проверки — false. */
   stress?: boolean;
+  /**
+   * Считать связность инкрементально — от изменившихся вокселей, а не по
+   * всей форме. Результат тот же; выключается для сверки в тестах.
+   */
+  incremental?: boolean;
+  /** Предел обхода при инкрементальном поиске якоря. Выше — полный проход. */
+  incrementalVisitLimit?: number;
 }
 
 export interface FragmentInfo {
@@ -42,6 +49,8 @@ const DEFAULTS = {
   maxFragmentsPerStep: 64,
   loadScale: 1,
   stress: true,
+  incremental: true,
+  incrementalVisitLimit: 20000,
 } satisfies Required<StructureOptions>;
 
 /**
@@ -141,6 +150,90 @@ export function findLooseComponents(shape: VoxelShape, anchored: Uint8Array): nu
   return components;
 }
 
+/**
+ * Инкрементальная связность: обход только от изменившихся вокселей.
+ *
+ * Удаление вокселя способно оторвать от земли лишь то, что было с ним
+ * рядом, — поэтому вместо флуда по всей форме идём от соседей изменённых
+ * клеток по связному куску, пока не упрёмся в якорь. Нашли якорь — весь
+ * кусок держится, и обходить его до конца незачем: связность транзитивна.
+ * Обошли кусок целиком и якоря нет — вот и обломок.
+ *
+ * Возвращает null, если обход вышел за лимит: тогда полный проход дешевле.
+ */
+export function looseComponentsIncremental(
+  shape: VoxelShape,
+  changed: readonly number[],
+  visitLimit: number = DEFAULTS.incrementalVisitLimit,
+): number[][] | null {
+  const { sx, sy, sz } = shape;
+  const data = shape.data;
+  const resolved = new Set<number>();
+  const out: number[][] = [];
+  const c = { x: 0, y: 0, z: 0 };
+  let budget = visitLimit;
+
+  // Стартовые точки: сама изменённая клетка, если она твёрдая (поставили
+  // доску — она может висеть в воздухе), иначе её твёрдые соседи.
+  const seeds: number[] = [];
+  for (const idx of changed) {
+    if (idx < 0 || idx >= data.length) continue;
+    if (data[idx] !== Mat.Air) {
+      seeds.push(idx);
+      continue;
+    }
+    shape.coords(idx, c);
+    for (let k = 0; k < 6; k++) {
+      const nx = c.x + NEIGHBORS[k][0];
+      const ny = c.y + NEIGHBORS[k][1];
+      const nz = c.z + NEIGHBORS[k][2];
+      if (nx < 0 || ny < 0 || nz < 0 || nx >= sx || ny >= sy || nz >= sz) continue;
+      const j = shape.idx(nx, ny, nz);
+      if (data[j] !== Mat.Air) seeds.push(j);
+    }
+  }
+
+  for (const seed of seeds) {
+    if (resolved.has(seed) || data[seed] === Mat.Air) continue;
+
+    const comp: number[] = [];
+    const seen = new Set<number>([seed]);
+    const stack = [seed];
+    let anchored = false;
+
+    while (stack.length > 0) {
+      if (--budget < 0) return null;
+      const i = stack.pop()!;
+      shape.coords(i, c);
+      if (isAnchorVoxel(shape, c.x, c.y, c.z)) {
+        anchored = true;
+        break;
+      }
+      comp.push(i);
+      for (let k = 0; k < 6; k++) {
+        const nx = c.x + NEIGHBORS[k][0];
+        const ny = c.y + NEIGHBORS[k][1];
+        const nz = c.z + NEIGHBORS[k][2];
+        if (nx < 0 || ny < 0 || nz < 0 || nx >= sx || ny >= sy || nz >= sz) continue;
+        const j = shape.idx(nx, ny, nz);
+        if (data[j] === Mat.Air || seen.has(j)) continue;
+        seen.add(j);
+        stack.push(j);
+      }
+    }
+
+    if (anchored) {
+      // Всё пройденное висит на найденном якоре — перепроверять нечего.
+      for (const i of seen) resolved.add(i);
+    } else {
+      for (const i of comp) resolved.add(i);
+      if (comp.length > 0) out.push(comp);
+    }
+  }
+
+  return out;
+}
+
 export interface StressField {
   /** Нагрузка на воксель, Н. */
   load: Float32Array;
@@ -148,6 +241,42 @@ export interface StressField {
   moment: Float32Array;
   /** Индексы вокселей, не выдержавших нагрузку. */
   failures: number[];
+}
+
+/**
+ * Пересчитываемый кусок формы: столбцы по x и z целиком по высоте до слоя
+ * yTop включительно. Нагрузка течёт вниз, поэтому выше yTop ничего не
+ * меняется, а вбок расходится недалеко — отсюда и запас по краям.
+ */
+export interface StressRegion {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  /** Верхний пересчитываемый слой, включительно. */
+  yTop: number;
+}
+
+interface StressCache {
+  load: Float32Array;
+  moment: Float32Array;
+  /** Полный проход по форме уже был: частичный имеет смысл только поверх. */
+  full: boolean;
+}
+
+// Поля нагрузок живут вместе с формой: частичный пересчёт обновляет кусок,
+// остальное остаётся с прошлого полного прохода. Заодно исчезает по
+// двадцать мегабайт аллокаций на каждый удар по складу.
+const stressCache = new WeakMap<VoxelShape, StressCache>();
+
+/** Был ли по форме полный проход — без него частичному не на что опереться. */
+export function stressCacheReady(shape: VoxelShape): boolean {
+  return stressCache.get(shape)?.full === true;
+}
+
+/** Только для тестов: забыть накопленные поля нагрузок. */
+export function __clearStressCache(shape: VoxelShape): void {
+  stressCache.delete(shape);
 }
 
 /**
@@ -164,47 +293,124 @@ export interface StressField {
  * Разрушение наступает по превышению либо сжатия load/площадь > maxStress,
  * либо момента moment > maxMoment.
  */
-export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): StressField {
+export function computeStress(
+  shape: VoxelShape,
+  opts: StructureOptions = {},
+  region?: StressRegion,
+): StressField {
   const cfg = { ...DEFAULTS, ...opts };
   const { sx, sy, sz } = shape;
   const n = shape.data.length;
-  const load = new Float32Array(n);
-  const moment = new Float32Array(n);
-  const failures: number[] = [];
+  const data = shape.data;
   const s = shape.voxelSize;
   const area = s * s;
+  const voxelVolume = s * s * s;
   const g = cfg.gravity * cfg.loadScale;
 
-  // Собственный вес.
-  for (let i = 0; i < n; i++) {
-    const mat = shape.data[i];
-    if (mat === Mat.Air || !carriesLoad(mat)) continue;
-    load[i] = voxelMass(mat, s) * g;
+  let cache = stressCache.get(shape);
+  if (!cache || cache.load.length !== n) {
+    cache = { load: new Float32Array(n), moment: new Float32Array(n), full: false };
+    stressCache.set(shape, cache);
   }
+  // Частичный проход имеет смысл только поверх полного: иначе снаружи
+  // куска лежит не «старое верное», а просто ноль.
+  const partial = region !== undefined && cache.full;
+  const load = cache.load;
+  const moment = cache.moment;
+  const failures: number[] = [];
 
+  const x0 = partial ? Math.max(0, region!.x0) : 0;
+  const x1 = partial ? Math.min(sx, region!.x1) : sx;
+  const z0 = partial ? Math.max(0, region!.z0) : 0;
+  const z1 = partial ? Math.min(sz, region!.z1) : sz;
+  const yTop = partial ? Math.max(0, Math.min(sy - 1, region!.yTop)) : sy - 1;
+  if (x1 <= x0 || z1 <= z0) return { load, moment, failures };
+
+  const layerStride = sz * sx;
+  const below4 = new Int32Array(4);
   const layerIdx: number[] = [];
   const dist = new Int32Array(sx * sz);
   const comp = new Int32Array(sx * sz);
   const supported = new Uint8Array(sx * sz);
   const queue = new Int32Array(sx * sz);
+  // Вместо трёх fill() на каждый слой — штамп поколения. На складе в
+  // восемьдесят слоёв это заметная доля всей работы функции.
+  const distStamp = new Int32Array(sx * sz);
+  const compStamp = new Int32Array(sx * sz);
 
-  for (let y = sy - 1; y >= 0; y--) {
+  // --- Сброс пересчитываемого куска в собственный вес ---
+  // Пустые строки перешагиваем: в полой коробке склада их большинство,
+  // а воздух всё равно никто не читает — все потребители сначала
+  // смотрят на материал.
+  for (let y = 0; y <= yTop; y++) {
+    if (shape.solidInLayer(y) === 0) continue;
+    for (let z = z0; z < z1; z++) {
+      if (shape.solidInRow(y, z) === 0) continue;
+      const rowBase = (y * sz + z) * sx;
+      for (let x = x0; x < x1; x++) {
+        const i = rowBase + x;
+        const mat = data[i];
+        if (MAT_LOAD_BEARING[mat] === 0) continue;
+        load[i] = MAT_DENSITY[mat] * voxelVolume * g;
+        moment[i] = 0;
+      }
+    }
+  }
+
+  // --- Затравка сверху ---
+  // Слой над куском не менялся, но его нагрузку надо занести внутрь:
+  // без этого крыша перестала бы давить на то, что мы пересчитываем.
+  if (partial && yTop + 1 < sy) {
+    const y = yTop + 1;
+    for (let z = z0; z < z1; z++) {
+      if (shape.solidInRow(y, z) === 0) continue;
+      const rowBase = (y * sz + z) * sx;
+      for (let x = x0; x < x1; x++) {
+        const i = rowBase + x;
+        const mat = data[i];
+        if (MAT_LOAD_BEARING[mat] === 0) continue;
+        if (!supportedAt(data, sx, sz, layerStride, x, y, z, i)) continue;
+        const cnt = supportersBelow(data, sx, sz, layerStride, x, z, i, below4);
+        if (cnt === 0) continue;
+        const share = load[i] / cnt;
+        for (let k = 0; k < cnt; k++) {
+          const b = below4[k];
+          // Наружу куска не пишем: там значения верны с прошлого полного
+          // прохода, и добавка к ним была бы двойным счётом.
+          if (inSlab(b, sx, sz, x0, x1, z0, z1)) load[b] += share;
+        }
+      }
+    }
+  }
+
+  for (let y = yTop; y >= 0; y--) {
+    // Пустой слой считать нечего — а в воксельной карте их большинство.
+    if (shape.solidInLayer(y) === 0) continue;
+
+    const gen = y + 1;
     // --- Фаза 1: кто в этом слое опирается на что-то снизу ---
-    dist.fill(-1);
-    comp.fill(-1);
-    supported.fill(0);
     layerIdx.length = 0;
     let head = 0;
     let tail = 0;
 
-    for (let z = 0; z < sz; z++) {
-      for (let x = 0; x < sx; x++) {
-        const i = shape.idx(x, y, z);
-        const mat = shape.data[i];
-        if (mat === Mat.Air || !carriesLoad(mat)) continue;
-        const cell = z * sx + x;
+    for (let z = z0; z < z1; z++) {
+      if (shape.solidInRow(y, z) === 0) continue;
+      // Индексы считаем сдвигом от базы строки: idx() на каждую клетку
+      // слоя — это лишний умножитель на миллионы итераций.
+      const rowBase = (y * sz + z) * sx;
+      const cellBase = z * sx;
+      for (let x = x0; x < x1; x++) {
+        const i = rowBase + x;
+        const mat = data[i];
+        if (MAT_LOAD_BEARING[mat] === 0) continue;
+        const cell = cellBase + x;
         layerIdx.push(cell);
-        if (y === 0 || hasSupportBelow(shape, x, y, z)) {
+        distStamp[cell] = gen;
+        dist[cell] = -1;
+        supported[cell] = 0;
+
+        const sup = supportedAt(data, sx, sz, layerStride, x, y, z, i);
+        if (sup) {
           supported[cell] = 1;
           dist[cell] = 0;
           queue[tail++] = cell;
@@ -221,12 +427,11 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
       for (let k = 0; k < 4; k++) {
         const nx = cx + LATERAL[k][0];
         const nz = cz + LATERAL[k][1];
-        if (nx < 0 || nz < 0 || nx >= sx || nz >= sz) continue;
+        if (nx < x0 || nz < z0 || nx >= x1 || nz >= z1) continue;
         const ncell = nz * sx + nx;
-        if (dist[ncell] >= 0) continue;
-        const j = shape.idx(nx, y, nz);
-        const mat = shape.data[j];
-        if (mat === Mat.Air || !carriesLoad(mat)) continue;
+        if (MAT_LOAD_BEARING[data[(y * sz + nz) * sx + nx]] === 0) continue;
+        if (distStamp[ncell] === gen && dist[ncell] >= 0) continue;
+        distStamp[ncell] = gen;
         dist[ncell] = d + 1;
         queue[tail++] = ncell;
       }
@@ -241,17 +446,19 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
     // своего куска сразу, а плечо считается средним по висящей площади.
     let compCount = 0;
     for (const start of layerIdx) {
-      if (comp[start] >= 0) continue;
+      if (compStamp[start] === gen) continue;
       const id = compCount++;
       head = 0;
       tail = 0;
       queue[tail++] = start;
+      compStamp[start] = gen;
       comp[start] = id;
       let roots = 0;
       let hangLoad = 0;
       let hangCount = 0;
       let distSum = 0;
       let neck = 0;
+      let cutByEdge = false;
       const members: number[] = [];
 
       while (head < tail) {
@@ -259,10 +466,23 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
         members.push(cell);
         const cx = cell % sx;
         const cz = (cell - cx) / sx;
+        if (partial && !cutByEdge) {
+          // Кусок продолжается за границей пересчитываемой области —
+          // значит его настоящие опоры мы не видим.
+          const ci = (y * sz + cz) * sx + cx;
+          if (
+            (cx === x0 && x0 > 0 && loadBearing(data[ci - 1])) ||
+            (cx === x1 - 1 && x1 < sx && loadBearing(data[ci + 1])) ||
+            (cz === z0 && z0 > 0 && loadBearing(data[ci - sx])) ||
+            (cz === z1 - 1 && z1 < sz && loadBearing(data[ci + sx]))
+          ) {
+            cutByEdge = true;
+          }
+        }
         if (supported[cell]) {
           roots++;
         } else {
-          const i = shape.idx(cx, y, cz);
+          const i = (y * sz + cz) * sx + cx;
           hangLoad += load[i];
           hangCount++;
           distSum += Math.max(1, dist[cell]);
@@ -271,12 +491,11 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
         for (let k = 0; k < 4; k++) {
           const nx = cx + LATERAL[k][0];
           const nz = cz + LATERAL[k][1];
-          if (nx < 0 || nz < 0 || nx >= sx || nz >= sz) continue;
+          if (nx < x0 || nz < z0 || nx >= x1 || nz >= z1) continue;
           const ncell = nz * sx + nx;
-          if (comp[ncell] >= 0) continue;
-          const j = shape.idx(nx, y, nz);
-          const mat = shape.data[j];
-          if (mat === Mat.Air || !carriesLoad(mat)) continue;
+          if (compStamp[ncell] === gen) continue;
+          if (MAT_LOAD_BEARING[data[(y * sz + nz) * sx + nx]] === 0) continue;
+          compStamp[ncell] = gen;
           comp[ncell] = id;
           queue[tail++] = ncell;
         }
@@ -284,6 +503,11 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
 
       // Ни одной опоры — держать нечему, этим займётся связность.
       if (roots === 0 || hangCount === 0) continue;
+      // Обрезанный кусок не перераспределяем вовсе. Свалить его вес на
+      // те опоры, что попали в область, — верный способ выдумать обвал:
+      // на деле висящая часть держится и на опорах снаружи. Недобор
+      // безопасен, перебор — нет.
+      if (cutByEdge) continue;
 
       const share = hangLoad / roots;
       const lever = (distSum / hangCount) * s;
@@ -295,7 +519,7 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
       for (const cell of members) {
         const cx = cell % sx;
         const cz = (cell - cx) / sx;
-        const i = shape.idx(cx, y, cz);
+        const i = (y * sz + cz) * sx + cx;
         if (supported[cell]) {
           load[i] += share;
           if (neck === 0) moment[i] += share * lever;
@@ -313,25 +537,36 @@ export function computeStress(shape: VoxelShape, opts: StructureOptions = {}): S
         if (!supported[cell]) continue;
         const cx = cell % sx;
         const cz = (cell - cx) / sx;
-        const i = shape.idx(cx, y, cz);
-        const below = collectSupportersBelow(shape, cx, y, cz);
-        if (below.length === 0) continue;
-        const share = load[i] / below.length;
-        for (const b of below) load[b] += share;
+        const i = (y * sz + cz) * sx + cx;
+        const cnt = supportersBelow(data, sx, sz, layerStride, cx, cz, i, below4);
+        if (cnt === 0) continue;
+        const share = load[i] / cnt;
+        for (let k = 0; k < cnt; k++) {
+          const b = below4[k];
+          if (!partial || inSlab(b, sx, sz, x0, x1, z0, z1)) load[b] += share;
+        }
       }
     }
   }
 
   // --- Проверка предельных состояний ---
-  for (let i = 0; i < n; i++) {
-    const mat = shape.data[i];
-    if (mat === Mat.Air || !carriesLoad(mat)) continue;
-    const def = material(mat);
-    if (def.indestructible) continue;
-    const stress = load[i] / area;
-    if (stress > def.maxStress || moment[i] > def.maxMoment) failures.push(i);
+  for (let y = 0; y <= yTop; y++) {
+    if (shape.solidInLayer(y) === 0) continue;
+    for (let z = z0; z < z1; z++) {
+      if (shape.solidInRow(y, z) === 0) continue;
+      const rowBase = (y * sz + z) * sx;
+      for (let x = x0; x < x1; x++) {
+        const i = rowBase + x;
+        const mat = data[i];
+        if (MAT_LOAD_BEARING[mat] === 0 || MAT_INDESTRUCTIBLE[mat] === 1) continue;
+        if (load[i] / area > MAT_MAX_STRESS[mat] || moment[i] > MAT_MAX_MOMENT[mat]) {
+          failures.push(i);
+        }
+      }
+    }
   }
 
+  if (!partial) cache.full = true;
   return { load, moment, failures };
 }
 
@@ -345,6 +580,101 @@ const LATERAL: ReadonlyArray<readonly [number, number]> = [
 function hasSupportBelow(shape: VoxelShape, x: number, y: number, z: number): boolean {
   if (y === 0) return true;
   return collectSupportersBelow(shape, x, y, z).length > 0;
+}
+
+/**
+ * Свойства материалов, разложенные по типизированным массивам.
+ *
+ * В горячем цикле важен не столько сам поиск, сколько то, что обращение к
+ * импортированной функции — это загрузка свойства из объекта модуля на
+ * каждый воксель. На двух с половиной миллионах клеток разница выходит
+ * в порядок, поэтому таблицы строятся один раз при загрузке.
+ */
+const MAT_COUNT = MATERIALS.length;
+const MAT_LOAD_BEARING = new Uint8Array(MAT_COUNT);
+const MAT_INDESTRUCTIBLE = new Uint8Array(MAT_COUNT);
+const MAT_MAX_STRESS = new Float64Array(MAT_COUNT);
+const MAT_MAX_MOMENT = new Float64Array(MAT_COUNT);
+const MAT_DENSITY = new Float64Array(MAT_COUNT);
+for (let id = 0; id < MAT_COUNT; id++) {
+  const def = MATERIALS[id];
+  MAT_LOAD_BEARING[id] = id !== Mat.Air && carriesLoad(id) ? 1 : 0;
+  MAT_INDESTRUCTIBLE[id] = def.indestructible ? 1 : 0;
+  MAT_MAX_STRESS[id] = def.maxStress;
+  MAT_MAX_MOMENT[id] = def.maxMoment;
+  MAT_DENSITY[id] = def.density;
+}
+
+const loadBearing = (mat: number): boolean => MAT_LOAD_BEARING[mat] === 1;
+
+/**
+ * Опирается ли клетка на что-то в слое ниже: прямо под собой или по
+ * диагонали. Функция модульная, а не замыкание внутри computeStress:
+ * замыкание утаскивает локальные переменные горячего цикла в контекст,
+ * и цикл тормозит впятеро — это было видно в профиле.
+ */
+function supportedAt(
+  data: Uint8Array,
+  sx: number,
+  sz: number,
+  layerStride: number,
+  x: number,
+  y: number,
+  z: number,
+  index: number,
+): boolean {
+  if (y === 0) return true;
+  const belowBase = index - layerStride;
+  if (loadBearing(data[belowBase])) return true;
+  if (x > 0 && loadBearing(data[belowBase - 1])) return true;
+  if (x + 1 < sx && loadBearing(data[belowBase + 1])) return true;
+  if (z > 0 && loadBearing(data[belowBase - sx])) return true;
+  if (z + 1 < sz && loadBearing(data[belowBase + sx])) return true;
+  return false;
+}
+
+/** Внутри ли клетка пересчитываемого куска — по столбцу x/z. */
+function inSlab(
+  index: number,
+  sx: number,
+  sz: number,
+  x0: number,
+  x1: number,
+  z0: number,
+  z1: number,
+): boolean {
+  const x = index % sx;
+  const z = ((index - x) / sx) % sz;
+  return x >= x0 && x < x1 && z >= z0 && z < z1;
+}
+
+/**
+ * То же, что collectSupportersBelow, но пишет в готовый буфер и работает
+ * с сырыми индексами: в фазе 4 эта функция зовётся на каждый опёртый
+ * воксель, и массив на каждый вызов там был заметен в профиле.
+ */
+function supportersBelow(
+  data: Uint8Array,
+  sx: number,
+  sz: number,
+  layerStride: number,
+  x: number,
+  z: number,
+  index: number,
+  out: Int32Array,
+): number {
+  const belowBase = index - layerStride;
+  const direct = data[belowBase];
+  if (loadBearing(direct)) {
+    out[0] = belowBase;
+    return 1;
+  }
+  let n = 0;
+  if (x > 0 && loadBearing(data[belowBase - 1])) out[n++] = belowBase - 1;
+  if (x + 1 < sx && loadBearing(data[belowBase + 1])) out[n++] = belowBase + 1;
+  if (z > 0 && loadBearing(data[belowBase - sx])) out[n++] = belowBase - sx;
+  if (z + 1 < sz && loadBearing(data[belowBase + sx])) out[n++] = belowBase + sx;
+  return n;
 }
 
 /** Опоры под вокселем: сначала прямо под ним, иначе четыре диагонали. */
@@ -363,6 +693,98 @@ function collectSupportersBelow(shape: VoxelShape, x: number, y: number, z: numb
     if (m !== Mat.Air && carriesLoad(m)) out.push(j);
   }
   return out;
+}
+
+/**
+ * Мельче этого объёма форму считаем целиком: частичный проход по кубику
+ * 32³ не окупает возни с границами.
+ */
+const PARTIAL_STRESS_MIN_VOLUME = 1 << 19;
+/**
+ * Запас вокруг задетых чанков. Нагрузка с повисшего куска расходится по
+ * слою до ближайших опор; три метра запаса покрывают дыру от заряда, а
+ * дальше уже дешевле считать всю форму.
+ */
+const PARTIAL_STRESS_MARGIN = CHUNK_SIZE;
+/** Разросся кусок больше этой доли формы — частичный проход не выгоден. */
+const PARTIAL_STRESS_MAX_FRACTION = 0.4;
+/**
+ * Потолок стороны куска в вокселях. Без него два далёких чанка дают
+ * кусок во всю ширину склада: по площади он ещё проходит, а считается
+ * как половина формы.
+ */
+const PARTIAL_STRESS_MAX_SPAN = 3 * CHUNK_SIZE;
+
+export interface PartialStressPlan {
+  region: StressRegion;
+  /** Чанки, которые этот проход закрывает. */
+  chunks: number[];
+}
+
+/**
+ * Кусок для частичного пересчёта напряжений по грязным чанкам формы.
+ *
+ * Чанки берутся не все сразу: кусок растёт, пока укладывается в потолок,
+ * и на этом проход останавливается. Остальные чанки остаются грязными и
+ * достанутся следующему проходу — так один большой взрыв растекается по
+ * нескольким кадрам вместо одного провала на четверть секунды.
+ *
+ * undefined — считать всю форму целиком.
+ */
+export function partialStressPlan(shape: VoxelShape): PartialStressPlan | undefined {
+  if (shape.volume < PARTIAL_STRESS_MIN_VOLUME) return undefined;
+  if (!stressCacheReady(shape)) return undefined;
+  const dirty = shape.dirtyStructureChunks;
+  if (dirty.size === 0) return undefined;
+
+  const budget = shape.sx * shape.sz * PARTIAL_STRESS_MAX_FRACTION;
+  const taken: number[] = [];
+  let x0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let z1 = -Infinity;
+  let yMax = -Infinity;
+
+  for (const c of dirty) {
+    const b = shape.chunkBounds(c);
+    const nx0 = Math.min(x0, b.x0);
+    const nz0 = Math.min(z0, b.z0);
+    const nx1 = Math.max(x1, b.x1);
+    const nz1 = Math.max(z1, b.z1);
+    const spanX =
+      Math.min(shape.sx, nx1 + PARTIAL_STRESS_MARGIN) - Math.max(0, nx0 - PARTIAL_STRESS_MARGIN);
+    const spanZ =
+      Math.min(shape.sz, nz1 + PARTIAL_STRESS_MARGIN) - Math.max(0, nz0 - PARTIAL_STRESS_MARGIN);
+    // Первый чанк берём всегда: иначе проход не сдвинется с места.
+    if (
+      taken.length > 0 &&
+      (spanX * spanZ > budget ||
+        spanX > PARTIAL_STRESS_MAX_SPAN ||
+        spanZ > PARTIAL_STRESS_MAX_SPAN)
+    ) {
+      continue;
+    }
+    x0 = nx0;
+    z0 = nz0;
+    x1 = nx1;
+    z1 = nz1;
+    if (b.y1 > yMax) yMax = b.y1;
+    taken.push(c);
+  }
+
+  const rx0 = Math.max(0, x0 - PARTIAL_STRESS_MARGIN);
+  const rx1 = Math.min(shape.sx, x1 + PARTIAL_STRESS_MARGIN);
+  const rz0 = Math.max(0, z0 - PARTIAL_STRESS_MARGIN);
+  const rz1 = Math.min(shape.sz, z1 + PARTIAL_STRESS_MARGIN);
+  if ((rx1 - rx0) * (rz1 - rz0) > budget) return undefined;
+
+  // Верхний слой — на один выше задетого: клетка над дырой теряет опору,
+  // и её нагрузка тоже перераспределяется. Выше уже ничего не меняется,
+  // нагрузка течёт вниз.
+  return {
+    region: { x0: rx0, x1: rx1, z0: rz0, z1: rz1, yTop: Math.min(shape.sy - 1, yMax) },
+    chunks: taken,
+  };
 }
 
 /**
@@ -464,15 +886,41 @@ export function solveBodyStructure(
 
   for (const shape of body.shapes) {
     if (shape.solidVoxels === 0) continue;
+    // Чистую форму пересчитывать незачем: её данные не менялись, а прошлый
+    // проход уже сказал, что она стоит. Без этой проверки удар по складу
+    // тянул за собой полный пересчёт грунта — пять миллионов клеток на
+    // каждый чих.
+    if (shape.structureScanned && !shape.structureDirty) continue;
 
     if (cfg.stress) {
-      const { failures } = computeStress(shape, cfg);
+      const plan = cfg.incremental ? partialStressPlan(shape) : undefined;
+      const { failures } = computeStress(shape, cfg, plan?.region);
+      // Разбор грязи до правок: то, что разрушат сами напряжения, должно
+      // попасть в следующий проход, а не потеряться вместе с чанками.
+      if (plan) shape.consumeStructureChunks(plan.chunks);
+      else shape.clearStructureDirty();
       for (const i of failures) shape.setAt(i, Mat.Air);
       result.stressFailures += failures.length;
+    } else {
+      shape.clearStructureDirty();
     }
 
-    const anchored = computeAnchored(shape);
-    const loose = findLooseComponents(shape, anchored);
+    // Изменения снимаем после напряжений: то, что раскрошилось от них,
+    // тоже могло что-то оторвать.
+    const changes = shape.takeStructureChanges();
+
+    // Инкрементальный проход имеет право работать только поверх формы,
+    // которую хоть раз просмотрели целиком: он ищет оторвавшееся от
+    // изменений, а в только что загруженной карте висеть может что угодно.
+    let loose: number[][] | null = null;
+    if (cfg.incremental && shape.structureScanned && !changes.overflow) {
+      loose = looseComponentsIncremental(shape, changes.indices, cfg.incrementalVisitLimit);
+    }
+    if (loose === null) {
+      const anchored = computeAnchored(shape);
+      loose = findLooseComponents(shape, anchored);
+      shape.structureScanned = true;
+    }
     if (loose.length === 0) continue;
 
     // Крупные обломки — вперёд: они интереснее визуально.
@@ -526,11 +974,10 @@ export function stepStructure(
     if (body.destroyed || body.passive) continue;
     // Динамические обломки в Teardown уже жёсткие: их не пересчитываем.
     if (body.kind !== 'static') continue;
-    const dirty = body.shapes.some((s) => s.dirtyStructure.x1 >= s.dirtyStructure.x0);
+    const dirty = body.shapes.some((s) => s.structureDirty);
     if (!dirty) continue;
 
     const res = solveBodyStructure(body, opts);
-    for (const s of body.shapes) s.clearStructureDirty();
 
     for (const f of res.fragments) {
       world.addBody(f.body);

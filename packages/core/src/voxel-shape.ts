@@ -69,6 +69,19 @@ export function regionUnion(a: VoxelRegion, b: VoxelRegion): VoxelRegion {
   };
 }
 
+/**
+ * Ребро чанка в вокселях. Тот же 32, что и в рендере: если бы числа
+ * разошлись, один удар пачкал бы полтора чанка сетки рендера.
+ */
+export const CHUNK_SIZE = 32;
+
+/**
+ * Потолок списка изменённых вокселей. Дальше инкрементальный проход
+ * дороже полного, и список перестаёт расти — вместо него поднимается
+ * флаг переполнения.
+ */
+export const CHANGE_LIMIT = 8192;
+
 let nextShapeId = 1;
 /** Только для тестов: сброс счётчика, чтобы id были предсказуемы. */
 export function __resetShapeIds(): void {
@@ -105,7 +118,36 @@ export class VoxelShape {
   /** Грязная область с последнего расчёта структурной целостности. */
   dirtyStructure: VoxelRegion = emptyRegion();
 
+  /**
+   * Грязные чанки — то же самое, но без склейки в один AABB. Два удара по
+   * противоположным углам склада дают два чанка, а не прямоугольник во всю
+   * форму, и рендер перестраивает ровно задетое.
+   */
+  readonly dirtyMeshChunks = new Set<number>();
+  readonly dirtyStructureChunks = new Set<number>();
+
+  /** Размер сетки чанков. */
+  readonly chunksX: number;
+  readonly chunksY: number;
+  readonly chunksZ: number;
+
+  /**
+   * Полный структурный проход по форме уже был. Пока false, инкрементальный
+   * анализ не имеет права работать: он ищет только то, что оторвалось от
+   * изменений, а в свежезагруженной карте может висеть что угодно.
+   */
+  structureScanned = false;
+
   private solidCount = 0;
+  /** Непустых вокселей в каждом слое y — чтобы пропускать пустые слои. */
+  private layerSolid: Uint32Array;
+  /**
+   * Непустых вокселей в каждой строке (y,z). В полой коробке склада
+   * пустых строк большинство, и структурный проход их просто перешагивает.
+   */
+  private rowSolid: Uint32Array;
+  private changedVoxels: number[] = [];
+  private changedOverflow = false;
 
   constructor(opts: VoxelShapeOptions) {
     const { sx, sy, sz } = opts;
@@ -125,6 +167,51 @@ export class VoxelShape {
     this.transform = opts.transform ?? transformIdentity();
     this.grounded = opts.grounded ?? false;
     this.name = opts.name ?? `shape${this.id}`;
+    this.chunksX = Math.ceil(sx / CHUNK_SIZE);
+    this.chunksY = Math.ceil(sy / CHUNK_SIZE);
+    this.chunksZ = Math.ceil(sz / CHUNK_SIZE);
+    this.layerSolid = new Uint32Array(sy);
+    this.rowSolid = new Uint32Array(sy * sz);
+  }
+
+  /** Всего чанков в форме — верхняя граница длины списка грязных. */
+  get chunkCount(): number {
+    return this.chunksX * this.chunksY * this.chunksZ;
+  }
+
+  /** Линейный индекс чанка, в котором лежит воксель. */
+  chunkIndexAt(x: number, y: number, z: number): number {
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cy = Math.floor(y / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    return (cy * this.chunksZ + cz) * this.chunksX + cx;
+  }
+
+  /** Границы чанка в индексах вокселей, обрезанные по форме. */
+  chunkBounds(chunk: number): VoxelRegion {
+    const cx = chunk % this.chunksX;
+    const t = (chunk - cx) / this.chunksX;
+    const cz = t % this.chunksZ;
+    const cy = (t - cz) / this.chunksZ;
+    return {
+      x0: cx * CHUNK_SIZE,
+      y0: cy * CHUNK_SIZE,
+      z0: cz * CHUNK_SIZE,
+      x1: Math.min(this.sx, (cx + 1) * CHUNK_SIZE),
+      y1: Math.min(this.sy, (cy + 1) * CHUNK_SIZE),
+      z1: Math.min(this.sz, (cz + 1) * CHUNK_SIZE),
+    };
+  }
+
+  /** Непустых вокселей в слое y. */
+  solidInLayer(y: number): number {
+    return y >= 0 && y < this.sy ? this.layerSolid[y] : 0;
+  }
+
+  /** Непустых вокселей в строке (y,z). */
+  solidInRow(y: number, z: number): number {
+    if (y < 0 || y >= this.sy || z < 0 || z >= this.sz) return 0;
+    return this.rowSolid[y * this.sz + z];
   }
 
   get volume(): number {
@@ -165,39 +252,103 @@ export class VoxelShape {
     const i = this.idx(x, y, z);
     const prev = this.data[i];
     if (prev === mat) return false;
-    if (isSolid(prev)) this.solidCount--;
-    if (isSolid(mat)) this.solidCount++;
+    if (isSolid(prev)) {
+      this.solidCount--;
+      this.layerSolid[y]--;
+      this.rowSolid[y * this.sz + z]--;
+    }
+    if (isSolid(mat)) {
+      this.solidCount++;
+      this.layerSolid[y]++;
+      this.rowSolid[y * this.sz + z]++;
+    }
     this.data[i] = mat;
     this.damage[i] = 0;
     if (mat === Mat.Air) this.paint.delete(i);
-    this.markDirty(x, y, z);
+    this.touch(i, x, y, z);
     return true;
   }
 
   setAt(index: number, mat: number): boolean {
     const prev = this.data[index];
     if (prev === mat) return false;
-    if (isSolid(prev)) this.solidCount--;
-    if (isSolid(mat)) this.solidCount++;
+    const c = this.coords(index);
+    if (isSolid(prev)) {
+      this.solidCount--;
+      this.layerSolid[c.y]--;
+      this.rowSolid[c.y * this.sz + c.z]--;
+    }
+    if (isSolid(mat)) {
+      this.solidCount++;
+      this.layerSolid[c.y]++;
+      this.rowSolid[c.y * this.sz + c.z]++;
+    }
     this.data[index] = mat;
     this.damage[index] = 0;
     if (mat === Mat.Air) this.paint.delete(index);
-    const c = this.coords(index);
-    this.markDirty(c.x, c.y, c.z);
+    this.touch(index, c.x, c.y, c.z);
     return true;
   }
 
   markDirty(x: number, y: number, z: number): void {
+    if (!this.inBounds(x, y, z)) return;
+    this.touch(this.idx(x, y, z), x, y, z);
+  }
+
+  /** Пометить грязным только меш — материал не менялся (краска). */
+  markMeshDirty(x: number, y: number, z: number): void {
+    if (!this.inBounds(x, y, z)) return;
+    regionExpand(this.dirtyMesh, x, y, z);
+    this.dirtyMeshChunks.add(this.chunkIndexAt(x, y, z));
+  }
+
+  private touch(index: number, x: number, y: number, z: number): void {
     regionExpand(this.dirtyMesh, x, y, z);
     regionExpand(this.dirtyStructure, x, y, z);
+    const chunk = this.chunkIndexAt(x, y, z);
+    this.dirtyMeshChunks.add(chunk);
+    this.dirtyStructureChunks.add(chunk);
+    // Список изменений — вход инкрементального структурного анализа.
+    // Переполнился — значит изменений столько, что полный проход дешевле.
+    if (this.changedVoxels.length >= CHANGE_LIMIT) this.changedOverflow = true;
+    else this.changedVoxels.push(index);
+  }
+
+  /**
+   * Забрать изменения с прошлого структурного прохода и начать копить заново.
+   * overflow=true — изменений было больше потолка, инкрементальному анализу
+   * доверять нельзя.
+   */
+  takeStructureChanges(): { indices: number[]; overflow: boolean } {
+    const indices = this.changedVoxels;
+    const overflow = this.changedOverflow;
+    this.changedVoxels = [];
+    this.changedOverflow = false;
+    return { indices, overflow };
+  }
+
+  /** Есть ли что пересчитывать структурно. */
+  get structureDirty(): boolean {
+    return this.dirtyStructureChunks.size > 0;
   }
 
   clearMeshDirty(): void {
     this.dirtyMesh = emptyRegion();
+    this.dirtyMeshChunks.clear();
   }
 
   clearStructureDirty(): void {
     this.dirtyStructure = emptyRegion();
+    this.dirtyStructureChunks.clear();
+  }
+
+  /**
+   * Снять пометку с чанков, которые структурный проход уже закрыл.
+   * Остальные останутся грязными и достанутся следующему проходу.
+   */
+  consumeStructureChunks(chunks: Iterable<number>): void {
+    for (const c of chunks) this.dirtyStructureChunks.delete(c);
+    if (this.dirtyStructureChunks.size === 0) this.dirtyStructure = emptyRegion();
   }
 
   fill(region: Partial<VoxelRegion>, mat: number): number {
@@ -221,7 +372,16 @@ export class VoxelShape {
   /** Пересчитать solidCount с нуля — после прямой записи в data. */
   recountSolid(): number {
     let n = 0;
-    for (let i = 0; i < this.data.length; i++) if (this.data[i] !== Mat.Air) n++;
+    this.layerSolid.fill(0);
+    this.rowSolid.fill(0);
+    const c = { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < this.data.length; i++) {
+      if (this.data[i] === Mat.Air) continue;
+      n++;
+      this.coords(i, c);
+      this.layerSolid[c.y]++;
+      this.rowSolid[c.y * this.sz + c.z]++;
+    }
     this.solidCount = n;
     return n;
   }

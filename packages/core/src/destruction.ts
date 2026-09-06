@@ -543,12 +543,9 @@ export function paint(
             if (!isSurface(shape, x, y, z)) continue;
             if (shape.paint.get(i) === colorIndex) continue;
             shape.paint.set(i, colorIndex);
-            shape.dirtyMesh.x0 = Math.min(shape.dirtyMesh.x0, x);
-            shape.dirtyMesh.y0 = Math.min(shape.dirtyMesh.y0, y);
-            shape.dirtyMesh.z0 = Math.min(shape.dirtyMesh.z0, z);
-            shape.dirtyMesh.x1 = Math.max(shape.dirtyMesh.x1, x + 1);
-            shape.dirtyMesh.y1 = Math.max(shape.dirtyMesh.y1, y + 1);
-            shape.dirtyMesh.z1 = Math.max(shape.dirtyMesh.z1, z + 1);
+            // Краска не меняет ни материал, ни прочность — структурный
+            // анализ трогать незачем, только меш.
+            shape.markMeshDirty(x, y, z);
             painted++;
           }
         }

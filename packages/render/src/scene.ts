@@ -1,6 +1,10 @@
 import * as THREE from 'three';
-import { Body, VoxelShape, VoxelWorld, regionIsEmpty } from '@tvox/core';
+import { Body, CHUNK_SIZE, VoxelShape, VoxelWorld, regionIsEmpty } from '@tvox/core';
 import { MeshData, meshShape } from './mesher.js';
+
+/** Ключ чанка по координатам сетки. Сдвиг — чтобы -1 не схлопывался с 1. */
+const key3 = (x: number, y: number, z: number): number =>
+  (((x + 1) * 4096 + (y + 1)) * 4096) + (z + 1);
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -225,11 +229,38 @@ export class VoxelRenderer {
   }
 
   private markDirty(shape: VoxelShape): void {
+    const list = this.shapeChunks.get(shape.id);
+    if (!list) return;
+
+    // Список грязных чанков формы годится напрямую, только если сетки
+    // совпадают. Они совпадают по умолчанию (32 и там, и там), но размер
+    // чанка рендера настраиваемый — на другом падаем в грубый AABB.
+    if (this.chunkSize === CHUNK_SIZE && shape.dirtyMeshChunks.size > 0) {
+      const wanted = new Set<number>();
+      for (const chunk of shape.dirtyMeshChunks) {
+        const cx = chunk % shape.chunksX;
+        const t = (chunk - cx) / shape.chunksX;
+        const cz = t % shape.chunksZ;
+        const cy = (t - cz) / shape.chunksZ;
+        // Соседи по граням: шов на границе чанка зависит от вокселя за ней.
+        wanted.add(key3(cx, cy, cz));
+        wanted.add(key3(cx - 1, cy, cz));
+        wanted.add(key3(cx + 1, cy, cz));
+        wanted.add(key3(cx, cy - 1, cz));
+        wanted.add(key3(cx, cy + 1, cz));
+        wanted.add(key3(cx, cy, cz - 1));
+        wanted.add(key3(cx, cy, cz + 1));
+      }
+      for (const c of list) {
+        if (wanted.has(key3(c.cx, c.cy, c.cz))) c.dirty = true;
+      }
+      shape.clearMeshDirty();
+      return;
+    }
+
     const region = shape.dirtyMesh;
     if (regionIsEmpty(region)) return;
     const cs = this.chunkSize;
-    const list = this.shapeChunks.get(shape.id);
-    if (!list) return;
     // Захватываем соседние чанки: грань на шве зависит от вокселя за границей.
     const x0 = Math.floor((region.x0 - 1) / cs);
     const y0 = Math.floor((region.y0 - 1) / cs);
