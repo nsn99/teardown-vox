@@ -67,7 +67,9 @@ const browser = await chromium.launch({
   ],
 });
 
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// Разрешение поменьше игрового: на раннере рисует SwiftShader, то есть
+// процессор, и каждый лишний пиксель — это секунды прогона.
+const page = await browser.newPage({ viewport: { width: 1024, height: 576 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 page.on('console', (m) => {
@@ -80,7 +82,7 @@ page.on('response', (r) => {
 
 // Предохранитель: прогон, который завис, должен падать, а не занимать
 // раннер на полчаса.
-const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 240_000);
+const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 420_000);
 const hardStop = setTimeout(() => {
   console.error(`Дымовой прогон не уложился в ${HARD_TIMEOUT_MS} мс.`);
   process.exit(1);
@@ -162,6 +164,44 @@ try {
   });
   await page.screenshot({ path: join(outDir, '03-after.png') });
 
+  await step('свет попадает внутрь через пробитую крышу', async () => {
+    // Смысл небесного света в одной фразе приёмки: пробил крышу — внутри
+    // стало светло. Это единственная проверка освещения, которую можно
+    // сделать машиной, а не глазами, поэтому она здесь и есть.
+    // Смотрим на пол: именно туда ляжет свет из дыры. Снимать крышу,
+    // в которой эту дыру и пробили, бессмысленно — там меняется небо в
+    // проёме, а не освещённость зала.
+    const atFloor = () => window.tvox.look(16, 1.7, 22, 0, -0.55);
+    await page.evaluate(atFloor);
+    await settleMesh(page);
+    const before = await meanLuminance(await page.screenshot({ type: 'png' }));
+    await page.screenshot({ path: join(outDir, '04-inside.png') });
+
+    const removed = await page.evaluate(() => {
+      window.tvox.look(16, 1.7, 22, 0, 0.95);
+      return window.tvox.blast(3);
+    });
+    if (removed <= 0) throw new Error('Крыша не пробилась, светить нечему');
+    await page.evaluate(atFloor);
+    await settleMesh(page);
+    const after = await meanLuminance(await page.screenshot({ type: 'png' }));
+    await page.screenshot({ path: join(outDir, '05-inside-lit.png') });
+
+    if (before < 0) {
+      steps.push('внутри склада: замер пропущен, нет графической библиотеки');
+      return;
+    }
+    steps.push(
+      `внутри склада: средняя яркость ${before.toFixed(4)} → ${after.toFixed(4)} ` +
+        `после дыры в крыше`,
+    );
+    if (after <= before * 1.08) {
+      throw new Error(
+        `Свет не попал внутрь: средняя яркость ${before.toFixed(4)} → ${after.toFixed(4)}`,
+      );
+    }
+  });
+
   await step('кадр держится в бюджете при активном разрушении', async () => {
     // Мерить один структурный проход бессмысленно: он неделим и намеренно
     // отодвигает следующий. Игрока волнует кадр, поэтому меряем кадры —
@@ -232,6 +272,16 @@ try {
   setTimeout(() => process.exit(process.exitCode ?? 0), 1500).unref();
 }
 
+/** Дождаться, пока в сцене не останется недостроенных чанков. */
+async function settleMesh(page) {
+  await page.waitForFunction(
+    () => (window.tvox?.renderer?.stats?.dirty ?? 1) === 0,
+    undefined,
+    { timeout: 60000, polling: 200 },
+  );
+  await page.waitForTimeout(500);
+}
+
 /** Доля достаточно светлых пикселей в PNG. */
 async function brightness(png) {
   const { chromium: _c } = await import('playwright');
@@ -255,6 +305,30 @@ async function brightness(png) {
   // Без графической библиотеки оцениваем по энтропии PNG: полностью
   // однотонный кадр сжимается в килобайты, живой — в десятки.
   return Math.min(1, png.length / 60_000);
+}
+
+/**
+ * Средняя яркость кадра.
+ *
+ * Доля светлых точек годится, чтобы поймать чёрный экран, но не годится,
+ * чтобы поймать «стало светлее»: пятно света в тёмном зале не переводит
+ * пиксели через порог, оно поднимает средний уровень.
+ */
+async function meanLuminance(png) {
+  const { createCanvas, loadImage } = await tryCanvas();
+  if (!createCanvas) return -1;
+  const img = await loadImage(png);
+  const c = createCanvas(img.width, img.height);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const { data } = ctx.getImageData(0, 0, img.width, img.height);
+  let sum = 0;
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4 * 7) {
+    total++;
+    sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  }
+  return sum / total / 255;
 }
 
 async function tryCanvas() {

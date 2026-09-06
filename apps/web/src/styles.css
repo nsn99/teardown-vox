@@ -236,6 +236,11 @@ html, body {
 .result__panel .btn { margin-right: 10px; }
 
 /* Подлёт: полоса набирается по мере приближения вертолёта. */
+.chase[hidden] {
+  /* Собственный display перебивает атрибут hidden, поэтому гасим явно. */
+  display: none;
+}
+
 .chase {
   position: absolute;
   top: 5.2rem;

@@ -1021,5 +1021,68 @@
       "light": 7,
       "aquatic": true
     }
-  ]
+  ],
+  "environment": {
+    "daylight": "dusk",
+    "lights": [
+      {
+        "kind": "spot",
+        "position": [
+          31,
+          13.2,
+          7
+        ],
+        "target": [
+          20,
+          0,
+          16
+        ],
+        "color": "#ffd9a0",
+        "intensity": 110,
+        "range": 52,
+        "angle": 0.7,
+        "shadow": true
+      },
+      {
+        "kind": "spot",
+        "position": [
+          16,
+          7.6,
+          13.4
+        ],
+        "target": [
+          16,
+          0,
+          8
+        ],
+        "color": "#ffe2b8",
+        "intensity": 34,
+        "range": 24,
+        "angle": 0.85,
+        "shadow": true
+      },
+      {
+        "kind": "point",
+        "position": [
+          44.5,
+          3.4,
+          32.8
+        ],
+        "color": "#ffcf8a",
+        "intensity": 14,
+        "range": 11
+      },
+      {
+        "kind": "point",
+        "position": [
+          30.6,
+          6.4,
+          14.6
+        ],
+        "color": "#cfe4ff",
+        "intensity": 7,
+        "range": 9
+      }
+    ]
+  }
 }

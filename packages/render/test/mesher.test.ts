@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Mat, VoxelShape } from '@tvox/core';
+import { Mat, SkyLight, VoxelShape, material } from '@tvox/core';
 import { meshShape, surfaceArea } from '@tvox/render';
 
 const VS = 0.1;
@@ -129,5 +129,104 @@ describe('жадное меширование', () => {
       expect(mesh.positions[i + 1]).toBeLessThanOrEqual(7 * VS + 1e-5);
       expect(mesh.positions[i + 2]).toBeLessThanOrEqual(3 * VS + 1e-5);
     }
+  });
+});
+
+describe('меш несёт свойства материала', () => {
+  it('у каждой вершины есть металличность, шероховатость и свечение', () => {
+    const s = shape(3, 3, 3);
+    s.set(1, 1, 1, Mat.Metal);
+    const mesh = meshShape(s);
+    const vertices = mesh.positions.length / 3;
+    expect(mesh.props.length).toBe(vertices * 3);
+    expect(mesh.light.length).toBe(vertices);
+
+    const metal = material(Mat.Metal);
+    expect(mesh.props[0]).toBeCloseTo(metal.metalness, 5);
+    expect(mesh.props[1]).toBeCloseTo(metal.roughness, 5);
+    expect(mesh.props[2]).toBeCloseTo(metal.emissive, 5);
+  });
+
+  it('металл и грунт различаются блеском, а не только цветом', () => {
+    const metal = shape(3, 3, 3);
+    metal.set(1, 1, 1, Mat.Metal);
+    const dirt = shape(3, 3, 3);
+    dirt.set(1, 1, 1, Mat.Dirt);
+
+    const a = meshShape(metal);
+    const b = meshShape(dirt);
+    // Сталь бликует, грунт матовый: разница видна без подписи под вокселем.
+    expect(a.props[0]).toBeGreaterThan(b.props[0]);
+    expect(a.props[1]).toBeLessThan(b.props[1]);
+  });
+
+  it('кабель светится сам, бетон — нет', () => {
+    const cable = shape(3, 3, 3);
+    cable.set(1, 1, 1, Mat.Cable);
+    const concrete = shape(3, 3, 3);
+    concrete.set(1, 1, 1, Mat.Concrete);
+    expect(meshShape(cable).props[2]).toBeGreaterThan(0);
+    expect(meshShape(concrete).props[2]).toBe(0);
+  });
+
+  it('без поля света всё считается освещённым', () => {
+    const s = shape(3, 3, 3);
+    s.set(1, 1, 1, Mat.Brick);
+    const mesh = meshShape(s);
+    for (let i = 0; i < mesh.light.length; i++) expect(mesh.light[i]).toBe(1);
+  });
+
+  it('свет читается со стороны грани и попадает в вершины', () => {
+    // Коробка с дырой в крыше: пол под дырой освещён, углы — нет.
+    const s = shape(12, 8, 12);
+    s.fill({}, Mat.Concrete);
+    s.fill({ x0: 1, y0: 1, z0: 1, x1: 11, y1: 7, z1: 11 }, Mat.Air);
+    s.fill({ x0: 5, y0: 7, z0: 5, x1: 7, y1: 8, z1: 7 }, Mat.Air);
+    const sky = new SkyLight(s);
+
+    const lit = meshShape(s, { sky });
+    const flat = meshShape(s);
+    expect(lit.quads).toBeGreaterThan(flat.quads);
+
+    // В освещённом меше есть и тёмные вершины, и светлые: именно это и
+    // означает «свет попал внутрь», а не «сцена стала ярче целиком».
+    let min = 1;
+    let max = 0;
+    for (let i = 0; i < lit.light.length; i++) {
+      min = Math.min(min, lit.light[i]);
+      max = Math.max(max, lit.light[i]);
+    }
+    expect(max).toBe(1);
+    expect(min).toBeLessThan(0.6);
+  });
+
+  it('в наглухо закрытой комнате внутренние грани темны', () => {
+    const s = shape(24, 10, 24);
+    s.fill({}, Mat.Concrete);
+    s.fill({ x0: 1, y0: 1, z0: 1, x1: 23, y1: 9, z1: 23 }, Mat.Air);
+    const sky = new SkyLight(s);
+    // Пол в середине зала: свету взяться неоткуда.
+    expect(sky.at(12, 1, 12)).toBe(0);
+
+    const mesh = meshShape(s, { sky });
+    let dark = 0;
+    for (let i = 0; i < mesh.light.length; i++) if (mesh.light[i] === 0) dark++;
+    expect(dark).toBeGreaterThan(0);
+  });
+
+  it('склейка не смешивает освещённое с тёмным', () => {
+    // Длинный навес: свет затухает вдоль него, значит одной гранью
+    // на весь пол склеиться не может — иначе градиент пропадёт.
+    const s = shape(40, 6, 6);
+    s.fill({}, Mat.Concrete);
+    s.fill({ x0: 1, y0: 1, z0: 1, x1: 39, y1: 5, z1: 5 }, Mat.Air);
+    s.fill({ x0: 0, y0: 1, z0: 1, x1: 1, y1: 5, z1: 5 }, Mat.Air);
+    const sky = new SkyLight(s);
+
+    const lit = meshShape(s, { sky });
+    const flat = meshShape(s);
+    expect(lit.quads).toBeGreaterThan(flat.quads);
+    // Но и не рассыпается на воксели: склейка всё ещё работает.
+    expect(lit.quads).toBeLessThan(s.solidVoxels);
   });
 });

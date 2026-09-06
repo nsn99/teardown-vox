@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DestructionQueue,
   Simulation,
+  SkyLight,
   carve,
   explode,
   stepStructure,
@@ -42,6 +43,8 @@ const BUDGET = {
   fire: 8 * slack,
   /** Разбор очереди отложенного разрушения за кадр. */
   destruction: 90 * slack,
+  /** Пересчёт небесного света после удара. */
+  skylight: 60 * slack,
 };
 
 const profile: Record<string, number> = {};
@@ -146,6 +149,55 @@ describe('перф-бюджеты', () => {
     expect(med).toBeLessThan(BUDGET.remesh);
   });
 
+  it('ремеш чанка со светом укладывается в бюджет', () => {
+    // Тот же чанк, но с полем небесного света: свет читается на каждую
+    // видимую грань, и это самая горячая добавка к мешированию.
+    const sim = scene();
+    const level = [...sim.world.bodies.values()].find((b) => b.tags.has('level'))!;
+    const shape = level.shapes.find((s) => s.name === 'warehouse')!;
+    const region = shape.chunkBounds(shape.chunkIndexAt(20, 20, 20));
+    const sky = new SkyLight(shape);
+
+    const times: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const t = performance.now();
+      meshShape(shape, { region, originAtRegion: true, sky });
+      times.push(performance.now() - t);
+    }
+    const med = median(times);
+    profile['ремеш со светом: медиана, мс'] = round(med);
+    expect(med).toBeLessThan(BUDGET.remesh);
+  });
+
+  it('пересчёт небесного света после удара укладывается в бюджет', () => {
+    const sim = scene();
+    const level = [...sim.world.bodies.values()].find((b) => b.tags.has('level'))!;
+    const shape = level.shapes.find((s) => s.name === 'warehouse')!;
+
+    const t0 = performance.now();
+    const sky = new SkyLight(shape);
+    profile['свет: полный расчёт, мс'] = round(performance.now() - t0);
+
+    const times: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const region = {
+        x0: 60 + i * 8,
+        y0: 70,
+        z0: 60,
+        x1: 92 + i * 8,
+        y1: 80,
+        z1: 92,
+      };
+      shape.fill(region, 0);
+      const t = performance.now();
+      sky.rebuild(region);
+      times.push(performance.now() - t);
+    }
+    const med = median(times);
+    profile['свет: пересчёт куска, мс'] = round(med);
+    expect(med).toBeLessThan(BUDGET.skylight);
+  });
+
   it('шаг огня укладывается в бюджет', () => {
     const sim = scene();
     // Поджигаем причал: там дерево, и очаг разрастается сам.
@@ -174,7 +226,7 @@ describe('перф-бюджеты', () => {
     };
     writeFileSync('perf.json', `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     // Файл имеет смысл только если в нём есть все замеры.
-    expect(Object.keys(profile).length).toBeGreaterThanOrEqual(8);
+    expect(Object.keys(profile).length).toBeGreaterThanOrEqual(11);
   });
 });
 

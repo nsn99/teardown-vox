@@ -1,5 +1,14 @@
 import * as THREE from 'three';
-import { Body, CHUNK_SIZE, VoxelShape, VoxelWorld, regionIsEmpty } from '@tvox/core';
+import {
+  Body,
+  CHUNK_SIZE,
+  SKY_MAX,
+  SkyLightField,
+  VoxelRegion,
+  VoxelShape,
+  VoxelWorld,
+  regionIsEmpty,
+} from '@tvox/core';
 import { MeshData, meshShape } from './mesher.js';
 
 /** Ключ чанка по координатам сетки. Сдвиг — чтобы -1 не схлопывался с 1. */
@@ -40,6 +49,90 @@ interface ChunkEntry {
   center: THREE.Vector3;
 }
 
+export type Daylight = 'day' | 'dusk' | 'night';
+
+/** Источник света уровня: прожектор на кране, лампа над воротами. */
+export interface LevelLight {
+  kind: 'point' | 'spot';
+  position: { x: number; y: number; z: number };
+  /** Куда смотрит прожектор. Для точечной лампы не нужно. */
+  target?: { x: number; y: number; z: number };
+  /** Цвет в формате #rrggbb. */
+  color: string;
+  intensity: number;
+  /** Дальность, м. */
+  range: number;
+  /** Раствор конуса, рад. Только для прожектора. */
+  angle?: number;
+  /**
+   * Прожектор отбрасывает тень.
+   *
+   * Без этого он светит сквозь стены: лампа во дворе спокойно освещает
+   * пол внутри склада, и никакая честная модель освещённости этого не
+   * исправит — прямой свет теней не знает. Тень стоит карты глубины,
+   * поэтому включается точечно, для тех ламп, где это видно.
+   */
+  shadow?: boolean;
+}
+
+/**
+ * Время суток.
+ *
+ * Три пресета, а не плавный цикл: миссия длится минуты, солнце за это
+ * время никуда не уйдёт, а вот выбор «день или ночь» меняет всю карту —
+ * ночью читаются прожекторы, окна и огонь, днём — материалы и тени.
+ */
+const DAYLIGHT: Record<Daylight, {
+  sky: number;
+  fogNear: number;
+  sun: number;
+  sunColor: number;
+  hemiSky: number;
+  hemiGround: number;
+  hemi: number;
+  /** Насколько тёмными остаются места, куда не доходит небо. */
+  skyFloor: number;
+  exposure: number;
+}> = {
+  // Суммарная освещённость подобрана так, чтобы бетон оставался бетоном.
+  // Сложить солнце, небо и подсветку «на глаз» — верный способ получить
+  // белую заливку вместо материала: альбедо бетона 0.59, и всё, что даёт
+  // в сумме больше полутора, выжигает его в бумагу.
+  day: {
+    sky: 0x9dc4e8,
+    fogNear: 90,
+    sun: 1.85,
+    sunColor: 0xfff2dc,
+    hemiSky: 0xbcd6f0,
+    hemiGround: 0x6b6355,
+    hemi: 0.86,
+    skyFloor: 0.3,
+    exposure: 0.92,
+  },
+  dusk: {
+    sky: 0x1b2a3a,
+    fogNear: 60,
+    sun: 1.15,
+    sunColor: 0xffdcb4,
+    hemiSky: 0x88a8cc,
+    hemiGround: 0x2e2a26,
+    hemi: 0.7,
+    skyFloor: 0.22,
+    exposure: 0.95,
+  },
+  night: {
+    sky: 0x070c14,
+    fogNear: 32,
+    sun: 0.22,
+    sunColor: 0x9fb6f0,
+    hemiSky: 0x1e2c40,
+    hemiGround: 0x0d0c10,
+    hemi: 0.3,
+    skyFloor: 0.1,
+    exposure: 1.0,
+  },
+};
+
 const QUALITY = {
   low: { shadowMap: 0, pixelRatio: 0.75, ao: 0.3 },
   medium: { shadowMap: 2048, pixelRatio: 1, ao: 0.35 },
@@ -72,6 +165,21 @@ export class VoxelRenderer {
   private remeshMs: number;
   private aoStrength: number;
   private seenShapes = new Set<number>();
+  /**
+   * Небесный свет по вокселям. Карта теней знает, куда падает солнце, но
+   * не знает, что внутри склада темно: без этого поля разрушенная стена
+   * ничего не меняет в освещении зала.
+   */
+  private sky = new SkyLightField();
+  private hemi: THREE.HemisphereLight;
+  private levelLights: THREE.Object3D[] = [];
+  /** Лампы с неподвижной тенью: обновляются по перестройке геометрии. */
+  private staticShadows: THREE.SpotLight[] = [];
+  private lastShadowRefresh = 0;
+  private shadowSize: number;
+  private skyFloor = { value: 0.24 };
+  private voxelUniform = { value: 0.1 };
+  private daylight: Daylight = 'dusk';
 
   /** Метрики последнего кадра — для перф-регрессии. */
   stats = { chunks: 0, remeshed: 0, dirty: 0, quads: 0, triangles: 0 };
@@ -82,6 +190,7 @@ export class VoxelRenderer {
     this.remeshBudget = opts.remeshBudget ?? 6;
     this.remeshMs = opts.remeshMs ?? 4;
     this.aoStrength = quality.ao;
+    this.shadowSize = quality.shadowMap;
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: opts.canvas,
@@ -104,8 +213,8 @@ export class VoxelRenderer {
     this.scene.background = new THREE.Color(0x1b2a3a);
     this.scene.fog = new THREE.Fog(0x1b2a3a, 60, opts.viewDistance ?? 300);
 
-    const hemi = new THREE.HemisphereLight(0xa8c4e0, 0x3a352e, 0.95);
-    this.scene.add(hemi);
+    this.hemi = new THREE.HemisphereLight(0xa8c4e0, 0x3a352e, 0.95);
+    this.scene.add(this.hemi);
 
     // Ночной порт: низкое холодное «солнце» плюс тёплые прожекторы.
     this.sun = new THREE.DirectionalLight(0xffeeda, 1.7);
@@ -126,27 +235,180 @@ export class VoxelRenderer {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    // Подсветка «с воды»: без неё теневая сторона склада — чёрный силуэт,
-    // в котором не видно ни материала, ни проёма.
-    const fill = new THREE.DirectionalLight(0x7fa8d8, 0.45);
-    fill.position.set(35, 25, -40);
-    this.scene.add(fill);
 
-    this.opaqueMaterial = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.82,
-      metalness: 0.06,
-      flatShading: true,
-    });
-    this.glassMaterial = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.08,
-      metalness: 0.15,
-      transparent: true,
-      opacity: 0.4,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    });
+    this.opaqueMaterial = this.voxelMaterial(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.82,
+        metalness: 0.06,
+        flatShading: true,
+      }),
+    );
+    this.glassMaterial = this.voxelMaterial(
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.08,
+        metalness: 0.15,
+        transparent: true,
+        opacity: 0.4,
+        flatShading: true,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.setDaylight('dusk');
+  }
+
+  /**
+   * Заливающего света в сцене намеренно нет.
+   *
+   * Ненаправленная лампа «с воды» удобно вытягивала теневую сторону
+   * склада — и ровно так же светила сквозь стены внутрь, где неба нет.
+   * Купол справляется не хуже, а гасится небесным полем честно.
+   */
+
+  /**
+   * Свойства материала приходят из вершин, а не из объекта THREE.
+   *
+   * Материалов у нас восемнадцать, чанков — сотни: делать по материалу на
+   * каждый — это тысячи вызовов отрисовки вместо сотен. Поэтому
+   * металличность, шероховатость и свечение едут в атрибутах, а
+   * стандартный шейдер правится в трёх местах, чтобы их прочитать.
+   * Там же гасится рассеянный свет по небесному полю — от этого внутри
+   * склада темно, а в пробитую дыру бьёт свет.
+   */
+  private voxelMaterial(base: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+    base.onBeforeCompile = (shader) => {
+      shader.uniforms.uSkyFloor = this.skyFloor;
+      shader.uniforms.uVoxel = this.voxelUniform;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           attribute vec3 aProps;
+           attribute float aSky;
+           varying vec3 vProps;
+           varying float vSky;
+           varying vec3 vVoxelPos;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+           vProps = aProps;
+           vSky = aSky;
+           vVoxelPos = transformed;`,
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uSkyFloor;
+           uniform float uVoxel;
+           varying vec3 vProps;
+           varying float vSky;
+           varying vec3 vVoxelPos;
+           float tvoxHash( vec3 p ) {
+             return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
+           }`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+           // Зерно по вокселям, а не по грани. Жадная склейка отдаёт
+           // набережную одним квадом на сорок метров, и без этого она
+           // выглядит листом бумаги, а не бетоном. Считать в пикселе
+           // дешевле, чем ломать склейку ради разноцветных вершин.
+           float grain = tvoxHash( floor( vVoxelPos / uVoxel + 0.5 ) );
+           diffuseColor.rgb *= mix( 0.90, 1.07, grain );
+`,
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          'float roughnessFactor = clamp( vProps.y, 0.035, 1.0 );',
+        )
+        .replace(
+          '#include <metalnessmap_fragment>',
+          'float metalnessFactor = clamp( vProps.x, 0.0, 1.0 );',
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+           totalEmissiveRadiance += diffuseColor.rgb * vProps.z * 2.2;`,
+        )
+        .replace(
+          '#include <lights_fragment_begin>',
+          `#include <lights_fragment_begin>
+           irradiance *= mix( uSkyFloor, 1.0, vSky );`,
+        );
+    };
+    // Ключ кэша программ обязан отличаться от стандартного: иначе THREE
+    // подсунет сюда уже собранный шейдер без наших атрибутов.
+    base.customProgramCacheKey = () => 'tvox-voxel';
+    return base;
+  }
+
+  get time(): Daylight {
+    return this.daylight;
+  }
+
+  /** Переключить время суток. Работает на лету, без пересборки сцены. */
+  setDaylight(time: Daylight): void {
+    const p = DAYLIGHT[time];
+    this.daylight = time;
+    this.scene.background = new THREE.Color(p.sky);
+    this.scene.fog = new THREE.Fog(p.sky, p.fogNear, this.camera.far);
+    this.sun.intensity = p.sun;
+    this.sun.color = new THREE.Color(p.sunColor);
+    this.hemi.color = new THREE.Color(p.hemiSky);
+    this.hemi.groundColor = new THREE.Color(p.hemiGround);
+    this.hemi.intensity = p.hemi;
+    this.skyFloor.value = p.skyFloor;
+    this.renderer.toneMappingExposure = p.exposure;
+  }
+
+  /**
+   * Свет уровня: прожекторы на кране, лампы над воротами.
+   * Приходит из документа карты — ставить их в коде значило бы, что своя
+   * карта играется в темноте.
+   */
+  setLevelLights(lights: readonly LevelLight[] = []): void {
+    for (const l of this.levelLights) {
+      this.scene.remove(l);
+      const lit = l as THREE.Light;
+      lit.dispose?.();
+    }
+    this.levelLights = [];
+    this.staticShadows = [];
+
+    for (const def of lights) {
+      const color = new THREE.Color(def.color);
+      if (def.kind === 'spot') {
+        const spot = new THREE.SpotLight(color, def.intensity, def.range, def.angle ?? 0.6, 0.45, 1.4);
+        spot.position.set(def.position.x, def.position.y, def.position.z);
+        const t = def.target ?? { x: def.position.x, y: 0, z: def.position.z };
+        spot.target.position.set(t.x, t.y, t.z);
+        if (def.shadow && this.shadowSize > 0) {
+          spot.castShadow = true;
+          spot.shadow.mapSize.set(1024, 1024);
+          spot.shadow.camera.near = 1;
+          spot.shadow.camera.far = def.range;
+          spot.shadow.bias = -0.0012;
+          spot.shadow.normalBias = 0.06;
+          // Лампа неподвижна: её карта теней пересчитывается не каждый
+          // кадр, а когда в мире что-то перестроилось.
+          spot.shadow.autoUpdate = false;
+          spot.shadow.needsUpdate = true;
+          this.staticShadows.push(spot);
+        }
+        this.scene.add(spot, spot.target);
+        this.levelLights.push(spot, spot.target);
+      } else {
+        const point = new THREE.PointLight(color, def.intensity, def.range, 1.6);
+        point.position.set(def.position.x, def.position.y, def.position.z);
+        this.scene.add(point);
+        this.levelLights.push(point);
+      }
+    }
   }
 
   resize(width: number, height: number): void {
@@ -252,6 +514,45 @@ export class VoxelRenderer {
   }
 
   /**
+   * Пересчёт небесного света по всем изменениям формы разом.
+   *
+   * Именно разом: чанков, задетых одним взрывом, бывает два десятка, а
+   * свет всё равно считается полосой с запасом — двадцать пересчётов
+   * одного и того же стоили бы дороже самого взрыва.
+   */
+  private refreshSky(shape: VoxelShape): VoxelRegion | null {
+    if (shape.dirtyMeshChunks.size === 0) return null;
+    let region: VoxelRegion | null = null;
+    for (const chunk of shape.dirtyMeshChunks) {
+      const b = shape.chunkBounds(chunk);
+      region = region
+        ? {
+            x0: Math.min(region.x0, b.x0),
+            y0: Math.min(region.y0, b.y0),
+            z0: Math.min(region.z0, b.z0),
+            x1: Math.max(region.x1, b.x1),
+            y1: Math.max(region.y1, b.y1),
+            z1: Math.max(region.z1, b.z1),
+          }
+        : b;
+    }
+    if (!region) return null;
+    this.sky.rebuild(shape, region);
+
+    // Свет меняется дальше, чем геометрия: дыра в крыше освещает пол под
+    // собой и стены вокруг. Эти чанки геометрически чистые, но их меш
+    // хранит вчерашний свет, поэтому перестроить надо и их.
+    return {
+      x0: Math.max(0, region.x0 - SKY_MAX),
+      y0: 0,
+      z0: Math.max(0, region.z0 - SKY_MAX),
+      x1: Math.min(shape.sx, region.x1 + SKY_MAX),
+      y1: Math.min(shape.sy, region.y1 + SKY_MAX),
+      z1: Math.min(shape.sz, region.z1 + SKY_MAX),
+    };
+  }
+
+  /**
    * Трансформ формы внутри тела обновляется каждый кадр, а не один раз при
    * создании: формы бывают подвижными внутри своего тела — винт вертолёта
    * крутится, а фюзеляж нет.
@@ -267,6 +568,7 @@ export class VoxelRenderer {
   private markDirty(shape: VoxelShape): void {
     const list = this.shapeChunks.get(shape.id);
     if (!list) return;
+    const litRegion = this.refreshSky(shape);
 
     // Список грязных чанков формы годится напрямую, только если сетки
     // совпадают. Они совпадают по умолчанию (32 и там, и там), но размер
@@ -287,8 +589,10 @@ export class VoxelRenderer {
         wanted.add(key3(cx, cy, cz - 1));
         wanted.add(key3(cx, cy, cz + 1));
       }
+      const cs = this.chunkSize;
       for (const c of list) {
         if (wanted.has(key3(c.cx, c.cy, c.cz))) c.dirty = true;
+        else if (litRegion && touches(litRegion, c, cs)) c.dirty = true;
       }
       shape.clearMeshDirty();
       return;
@@ -384,7 +688,12 @@ export class VoxelRenderer {
       y1: Math.min(entry.shape.sy, (entry.cy + 1) * cs),
       z1: Math.min(entry.shape.sz, (entry.cz + 1) * cs),
     };
-    const common = { region, originAtRegion: true, aoStrength: this.aoStrength };
+    const common = {
+      region,
+      originAtRegion: true,
+      aoStrength: this.aoStrength,
+      sky: this.sky.of(entry.shape),
+    };
     applyMesh(entry.opaque, meshShape(entry.shape, { ...common, pass: 'opaque' }));
     applyMesh(entry.glass, meshShape(entry.shape, { ...common, pass: 'transparent' }));
     entry.dirty = false;
@@ -402,6 +711,18 @@ export class VoxelRenderer {
     quads = tris / 2;
     this.stats.quads = quads;
     this.stats.triangles = tris;
+
+    // Неподвижные лампы пересчитывают тень только когда мир изменился —
+    // и не чаще, чем раз в треть секунды. Во время долгого обрушения
+    // ремеш идёт каждый кадр, и обновлять по нему карты теней значит
+    // рисовать сцену лишний раз на каждую лампу.
+    if (this.stats.remeshed > 0 && this.staticShadows.length > 0) {
+      const now = performance.now();
+      if (now - this.lastShadowRefresh > 330) {
+        this.lastShadowRefresh = now;
+        for (const l of this.staticShadows) l.shadow.needsUpdate = true;
+      }
+    }
 
     // Тень идёт за игроком: солнце светит на его окрестность, а не на всю карту.
     this.sun.target.position.copy(this.camera.position);
@@ -423,11 +744,25 @@ export class VoxelRenderer {
   }
 }
 
+/** Задевает ли область освещения чанк. */
+function touches(r: VoxelRegion, c: { cx: number; cy: number; cz: number }, cs: number): boolean {
+  return (
+    c.cx * cs < r.x1 &&
+    (c.cx + 1) * cs > r.x0 &&
+    c.cy * cs < r.y1 &&
+    (c.cy + 1) * cs > r.y0 &&
+    c.cz * cs < r.z1 &&
+    (c.cz + 1) * cs > r.z0
+  );
+}
+
 function applyMesh(mesh: THREE.Mesh, data: MeshData): void {
   const geom = mesh.geometry as THREE.BufferGeometry;
   geom.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
   geom.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
   geom.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+  geom.setAttribute('aProps', new THREE.BufferAttribute(data.props, 3));
+  geom.setAttribute('aSky', new THREE.BufferAttribute(data.light, 1));
   geom.setIndex(new THREE.BufferAttribute(data.indices, 1));
   geom.computeBoundingSphere();
   mesh.visible = data.quads > 0;

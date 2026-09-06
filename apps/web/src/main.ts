@@ -107,6 +107,8 @@ function startRun(inSandbox: boolean): void {
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
   renderer.prime();
+  renderer.setDaylight(level.environment?.daylight ?? 'dusk');
+  renderer.setLevelLights(level.environment?.lights ?? []);
   wireEvents(heist);
   upgradeToRapier(heist);
 
@@ -239,6 +241,13 @@ function handleActions(h: Heist): void {
       thirdPerson = h.driving !== null;
       hud.message(h.driving ? `За рулём: ${h.driving.spec.name}` : 'Вышел', 1.5);
     }
+  }
+
+  if (input.take('KeyN')) {
+    const order = ['day', 'dusk', 'night'] as const;
+    const next = order[(order.indexOf(renderer.time) + 1) % order.length];
+    renderer.setDaylight(next);
+    hud.message(next === 'day' ? 'День' : next === 'dusk' ? 'Сумерки' : 'Ночь', 1.2);
   }
 
   if (input.take('KeyV')) {
@@ -380,6 +389,8 @@ declare global {
       particles: ParticleSystem;
       /** Взрыв в точке прицела: быстрый способ проверить обрушение. */
       blast(radius?: number): number;
+      /** Поставить игрока и повернуть камеру — для прогонов и отладки. */
+      look(x: number, y: number, z: number, yaw: number, pitch: number): void;
       /** Кусок ядра для замеров из прогона: разрушение и структура. */
       core: { carve: typeof carve; stepStructure: typeof stepStructure };
     };
@@ -402,6 +413,12 @@ window.tvox = {
     h.sim.settle();
     particles.emitDebris(res.debris, 1.5);
     return res.removed;
+  },
+  look(x, y, z, yaw, pitch) {
+    if (!heist) return;
+    heist.character.teleport(v3(x, y, z));
+    heist.yaw = yaw;
+    heist.pitch = pitch;
   },
   core: { carve, stepStructure },
 };

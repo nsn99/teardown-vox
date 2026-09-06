@@ -1,12 +1,26 @@
-import { Mat, MATERIALS, VoxelShape } from '@tvox/core';
+import { Mat, MATERIALS, SKY_MAX, VoxelShape } from '@tvox/core';
 
 export interface MeshData {
   positions: Float32Array;
   normals: Float32Array;
   colors: Float32Array;
+  /**
+   * Свойства материала для шейдера: металличность, шероховатость,
+   * свечение. По три числа на вершину. Держать их в вершинах, а не в
+   * отдельных материалах, — единственный способ оставить всю форму одним
+   * вызовом отрисовки: материалов у нас восемнадцать, а чанков — сотни.
+   */
+  props: Float32Array;
+  /** Небесный свет в вершине, 0..1. Модулирует рассеянный свет. */
+  light: Float32Array;
   indices: Uint32Array;
   /** Сколько квадов получилось — метрика качества меширования. */
   quads: number;
+}
+
+/** Источник небесного света: мешеру достаточно уметь его спросить. */
+export interface SkyLightSource {
+  at(x: number, y: number, z: number): number;
 }
 
 export interface MeshOptions {
@@ -24,6 +38,11 @@ export interface MeshOptions {
   region?: { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number };
   /** Смещение вершин, чтобы меш чанка жил в системе координат формы. */
   originAtRegion?: boolean;
+  /**
+   * Небесный свет формы. Читается со стороны грани — то есть из воздуха
+   * перед ней, а не из камня за ней.
+   */
+  sky?: SkyLightSource;
 }
 
 const DEFAULT_PAINT: ReadonlyArray<readonly [number, number, number]> = [
@@ -54,6 +73,7 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
   const aoStrength = opts.aoStrength ?? 0.35;
   const pass = opts.pass ?? 'opaque';
   const wantTransparent = pass === 'transparent';
+  const sky = opts.sky;
 
   const dims = [shape.sx, shape.sy, shape.sz];
   const s = shape.voxelSize;
@@ -74,6 +94,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
       positions: new Float32Array(0),
       normals: new Float32Array(0),
       colors: new Float32Array(0),
+      props: new Float32Array(0),
+      light: new Float32Array(0),
       indices: new Uint32Array(0),
       quads: 0,
     };
@@ -94,6 +116,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
         positions: new Float32Array(0),
         normals: new Float32Array(0),
         colors: new Float32Array(0),
+        props: new Float32Array(0),
+        light: new Float32Array(0),
         indices: new Uint32Array(0),
         quads: 0,
       };
@@ -103,6 +127,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
+  const props: number[] = [];
+  const light: number[] = [];
   const indices: number[] = [];
   let quads = 0;
 
@@ -154,6 +180,7 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
 
     const maskMat = new Int32Array(hu * hv);
     const maskAo = new Int32Array(hu * hv);
+    const maskSky = new Int32Array(hu * hv);
     const maskCol = new Float32Array(hu * hv * 3);
 
     for (const dir of [-1, 1] as const) {
@@ -183,6 +210,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
             const cell = j * hu + i;
             maskMat[cell] = mat;
             maskAo[cell] = ao.key;
+            // Свет берём из воздуха перед гранью: внутри камня его нет.
+            maskSky[cell] = sky ? sky.at(off[0], off[1], off[2]) : SKY_MAX;
             const c = colorOf(pos[0], pos[1], pos[2], mat, ao.mean);
             maskCol[cell * 3] = c[0];
             maskCol[cell * 3 + 1] = c[1];
@@ -200,12 +229,14 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
               continue;
             }
             const aoKey = maskAo[cell];
+            const skyKey = maskSky[cell];
 
             let wRun = 1;
             while (
               i + wRun < hu &&
               maskMat[cell + wRun] === mat &&
               maskAo[cell + wRun] === aoKey &&
+              maskSky[cell + wRun] === skyKey &&
               sameColor(maskCol, cell, cell + wRun)
             ) {
               wRun++;
@@ -218,6 +249,7 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
                 if (
                   maskMat[c2] !== mat ||
                   maskAo[c2] !== aoKey ||
+                  maskSky[c2] !== skyKey ||
                   !sameColor(maskCol, cell, c2)
                 ) {
                   break outer;
@@ -230,6 +262,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
               positions,
               normals,
               colors,
+              props,
+              light,
               indices,
               d,
               u,
@@ -246,6 +280,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
               maskCol[cell * 3],
               maskCol[cell * 3 + 1],
               maskCol[cell * 3 + 2],
+              mat,
+              skyKey / SKY_MAX,
             );
             quads++;
 
@@ -265,6 +301,8 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
+    props: new Float32Array(props),
+    light: new Float32Array(light),
     indices: new Uint32Array(indices),
     quads,
   };
@@ -342,6 +380,8 @@ function emitQuad(
   positions: number[],
   normals: number[],
   colors: number[],
+  props: number[],
+  light: number[],
   indices: number[],
   d: number,
   u: number,
@@ -358,6 +398,8 @@ function emitQuad(
   r: number,
   g: number,
   b: number,
+  mat: number,
+  sky: number,
 ): void {
   const base = positions.length / 3;
   // Грань лежит на плоскости slice (для dir=-1) или slice+1 (для dir=+1).
@@ -379,10 +421,13 @@ function emitQuad(
   const n = [0, 0, 0];
   n[d] = dir;
 
+  const def = MATERIALS[mat];
   for (const c of quad) {
     positions.push(c[0], c[1], c[2]);
     normals.push(n[0], n[1], n[2]);
     colors.push(r, g, b);
+    props.push(def.metalness, def.roughness, def.emissive);
+    light.push(sky);
   }
   indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }

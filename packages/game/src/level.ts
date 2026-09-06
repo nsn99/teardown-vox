@@ -27,6 +27,36 @@ export interface SpawnPoint {
   yaw: number;
 }
 
+export type Daylight = 'day' | 'dusk' | 'night';
+
+/**
+ * Источник света уровня: прожектор на кране, лампа над воротами.
+ *
+ * Живёт в карте, а не в коде рендера, по той же причине, что и всё
+ * остальное: своя карта не должна играться в темноте только потому, что
+ * свет кто-то захардкодил под «Порт».
+ */
+export interface LightDef {
+  kind: 'point' | 'spot';
+  position: Vec3;
+  /** Куда светит прожектор. Точечной лампе не нужно. */
+  target?: Vec3;
+  /** Цвет в формате #rrggbb. */
+  color: string;
+  intensity: number;
+  /** Дальность, м. */
+  range: number;
+  /** Раствор конуса, рад. */
+  angle?: number;
+  /** Прожектор отбрасывает тень — иначе он светит сквозь стены. */
+  shadow?: boolean;
+}
+
+export interface EnvironmentDef {
+  daylight: Daylight;
+  lights: LightDef[];
+}
+
 /**
  * Формат карты. Сразу поддерживает всё, что нужно ограблению:
  * воксельную геометрию, триггеры (сигнализация при краже цели),
@@ -45,6 +75,8 @@ export interface LevelSource {
   mission: MissionConfig;
   /** Кто приходит по концу таймера тревоги. Пусто — умолчания погони. */
   pursuit?: ChaserSpec[];
+  /** Время суток и свет уровня. */
+  environment?: EnvironmentDef;
   /** Создаёт тела уровня и возвращает их. */
   build(sim: Simulation): Body[];
 }

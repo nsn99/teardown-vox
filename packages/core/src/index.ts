@@ -9,6 +9,7 @@ export * from './destruction.js';
 export * from './destruction-queue.js';
 export * from './structure.js';
 export * from './fire.js';
+export * from './skylight.js';
 export * from './collider.js';
 export * from './physics.js';
 export * from './debris.js';

@@ -11,7 +11,16 @@ import {
   quatFromEulerYXZ,
   v3,
 } from '@tvox/core';
-import { LevelSource, SpawnPoint, TriggerDef, TriggerKind, VehicleSpawnDef } from './level.js';
+import {
+  Daylight,
+  EnvironmentDef,
+  LevelSource,
+  LightDef,
+  SpawnPoint,
+  TriggerDef,
+  TriggerKind,
+  VehicleSpawnDef,
+} from './level.js';
 import { ChaserKind, ChaserSpec } from './pursuit.js';
 import { MissionConfig, TargetSpec } from './mission.js';
 import { VehicleKind, VEHICLES } from './vehicles.js';
@@ -107,6 +116,14 @@ export type TriggerDoc = Omit<TriggerDef, 'center' | 'halfExtents'> & {
 export type VehicleDoc = Omit<VehicleSpawnDef, 'position'> & { position: Vec3Doc };
 export type TargetDoc = Omit<TargetSpec, 'position'> & { position: Vec3Doc };
 export type ChaserDoc = Omit<ChaserSpec, 'from'> & { from: Vec3Doc };
+export type LightDocEntry = Omit<LightDef, 'position' | 'target'> & {
+  position: Vec3Doc;
+  target?: Vec3Doc;
+};
+export interface EnvironmentDoc {
+  daylight?: Daylight;
+  lights?: LightDocEntry[];
+}
 export type MissionDoc = Omit<MissionConfig, 'targets' | 'extraction'> & {
   targets: TargetDoc[];
   extraction: { center: Vec3Doc; halfExtents: Vec3Doc };
@@ -128,6 +145,8 @@ export interface LevelDoc {
   mission: MissionDoc;
   /** Кто приходит по концу таймера. Пусто — берутся умолчания. */
   pursuit?: ChaserDoc[];
+  /** Время суток и свет уровня. */
+  environment?: EnvironmentDoc;
 }
 
 const point = (p: Vec3Doc): Vec3 => v3(p[0], p[1], p[2]);
@@ -154,6 +173,22 @@ export const missionOf = (doc: LevelDoc): MissionConfig => ({
 /** Преследователи документа в игровых. */
 export const pursuitOf = (doc: LevelDoc): ChaserSpec[] | undefined =>
   doc.pursuit?.map((c) => ({ ...c, from: point(c.from) }));
+
+/** Освещение документа в игровое. */
+export const environmentOf = (doc: LevelDoc): EnvironmentDef | undefined =>
+  doc.environment
+    ? {
+        daylight: doc.environment.daylight ?? 'dusk',
+        lights: (doc.environment.lights ?? []).map((l): LightDef => {
+          const { position, target, ...rest } = l;
+          return {
+            ...rest,
+            position: point(position),
+            ...(target ? { target: point(target) } : {}),
+          };
+        }),
+      }
+    : undefined;
 
 // ---------------------------------------------------------------------------
 // Разбор и проверка
@@ -424,6 +459,47 @@ function parseChaser(v: unknown, path: string): ChaserDoc {
   };
 }
 
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+function parseLight(v: unknown, path: string): LightDocEntry {
+  if (!isObj(v)) fail(path, `ожидался объект источника света, пришло ${show(v)}`);
+  const o = v as Record<string, unknown>;
+  const kind = str(o.kind, `${path}.kind`);
+  if (kind !== 'point' && kind !== 'spot') {
+    fail(`${path}.kind`, `ожидался point или spot, пришло «${kind}»`);
+  }
+  const color = str(o.color, `${path}.color`);
+  if (!HEX_COLOR.test(color)) {
+    fail(`${path}.color`, `цвет пишется как #rrggbb, пришло «${color}»`);
+  }
+  return {
+    kind,
+    position: vec3(o.position, `${path}.position`),
+    ...(o.target === undefined ? {} : { target: vec3(o.target, `${path}.target`) }),
+    color,
+    intensity: num(o.intensity, `${path}.intensity`),
+    range: num(o.range, `${path}.range`),
+    ...(o.angle === undefined ? {} : { angle: num(o.angle, `${path}.angle`) }),
+    ...(o.shadow === undefined ? {} : { shadow: Boolean(o.shadow) }),
+  };
+}
+
+function parseEnvironment(v: unknown, path: string): EnvironmentDoc {
+  if (!isObj(v)) fail(path, `ожидался объект окружения, пришло ${show(v)}`);
+  const o = v as Record<string, unknown>;
+  if (o.daylight !== undefined && !DAYLIGHTS.has(String(o.daylight))) {
+    fail(`${path}.daylight`, `ожидался day, dusk или night, пришло ${show(o.daylight)}`);
+  }
+  return {
+    ...(o.daylight === undefined ? {} : { daylight: o.daylight as Daylight }),
+    ...(Array.isArray(o.lights)
+      ? { lights: (o.lights as unknown[]).map((l, i) => parseLight(l, `${path}.lights[${i}]`)) }
+      : {}),
+  };
+}
+
+const DAYLIGHTS: ReadonlySet<string> = new Set(['day', 'dusk', 'night']);
+
 const TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'alarm-cable',
   'extraction',
@@ -485,6 +561,9 @@ export function parseLevelDoc(input: unknown): LevelDoc {
     ...(Array.isArray(o.pursuit)
       ? { pursuit: (o.pursuit as unknown[]).map((c, i) => parseChaser(c, `pursuit[${i}]`)) }
       : {}),
+    ...(o.environment === undefined
+      ? {}
+      : { environment: parseEnvironment(o.environment, 'environment') }),
   };
 }
 
@@ -694,6 +773,7 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
     vehicles: vehiclesOf(doc),
     mission,
     ...(doc.pursuit ? { pursuit: pursuitOf(doc)! } : {}),
+    ...(doc.environment ? { environment: environmentOf(doc)! } : {}),
     doc,
 
     build(sim: Simulation): Body[] {
@@ -794,6 +874,21 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
       },
     },
     ...(level.pursuit ? { pursuit: level.pursuit.map((c) => ({ ...c, from: flat(c.from) })) } : {}),
+    ...(level.environment
+      ? {
+          environment: {
+            daylight: level.environment.daylight,
+            lights: level.environment.lights.map((l): LightDocEntry => {
+              const { position, target, ...rest } = l;
+              return {
+                ...rest,
+                position: flat(position),
+                ...(target ? { target: flat(target) } : {}),
+              };
+            }),
+          },
+        }
+      : {}),
   };
 }
 
