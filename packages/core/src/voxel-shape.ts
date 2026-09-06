@@ -154,6 +154,8 @@ export class VoxelShape {
    * пустых строк большинство, и структурный проход их просто перешагивает.
    */
   private rowSolid: Uint32Array;
+  /** Непустых вокселей в каждом чанке: пустой чанк не мешается и не мешится. */
+  private chunkSolid: Uint32Array;
   private changedVoxels: number[] = [];
   private changedOverflow = false;
 
@@ -180,6 +182,7 @@ export class VoxelShape {
     this.chunksZ = Math.ceil(sz / CHUNK_SIZE);
     this.layerSolid = new Uint32Array(sy);
     this.rowSolid = new Uint32Array(sy * sz);
+    this.chunkSolid = new Uint32Array(this.chunksX * this.chunksY * this.chunksZ);
   }
 
   /** Всего чанков в форме — верхняя граница длины списка грязных. */
@@ -222,6 +225,11 @@ export class VoxelShape {
     return this.rowSolid[y * this.sz + z];
   }
 
+  /** Непустых вокселей в чанке. */
+  solidInChunk(chunk: number): number {
+    return chunk >= 0 && chunk < this.chunkSolid.length ? this.chunkSolid[chunk] : 0;
+  }
+
   get volume(): number {
     return this.sx * this.sy * this.sz;
   }
@@ -260,15 +268,12 @@ export class VoxelShape {
     const i = this.idx(x, y, z);
     const prev = this.data[i];
     if (prev === mat) return false;
-    if (isSolid(prev)) {
-      this.solidCount--;
-      this.layerSolid[y]--;
-      this.rowSolid[y * this.sz + z]--;
-    }
-    if (isSolid(mat)) {
-      this.solidCount++;
-      this.layerSolid[y]++;
-      this.rowSolid[y * this.sz + z]++;
+    if (isSolid(prev) !== isSolid(mat)) {
+      const d = isSolid(mat) ? 1 : -1;
+      this.solidCount += d;
+      this.layerSolid[y] += d;
+      this.rowSolid[y * this.sz + z] += d;
+      this.chunkSolid[this.chunkIndexAt(x, y, z)] += d;
     }
     this.data[i] = mat;
     this.damage[i] = 0;
@@ -281,15 +286,12 @@ export class VoxelShape {
     const prev = this.data[index];
     if (prev === mat) return false;
     const c = this.coords(index);
-    if (isSolid(prev)) {
-      this.solidCount--;
-      this.layerSolid[c.y]--;
-      this.rowSolid[c.y * this.sz + c.z]--;
-    }
-    if (isSolid(mat)) {
-      this.solidCount++;
-      this.layerSolid[c.y]++;
-      this.rowSolid[c.y * this.sz + c.z]++;
+    if (isSolid(prev) !== isSolid(mat)) {
+      const d = isSolid(mat) ? 1 : -1;
+      this.solidCount += d;
+      this.layerSolid[c.y] += d;
+      this.rowSolid[c.y * this.sz + c.z] += d;
+      this.chunkSolid[this.chunkIndexAt(c.x, c.y, c.z)] += d;
     }
     this.data[index] = mat;
     this.damage[index] = 0;
@@ -388,6 +390,7 @@ export class VoxelShape {
     let n = 0;
     this.layerSolid.fill(0);
     this.rowSolid.fill(0);
+    this.chunkSolid.fill(0);
     const c = { x: 0, y: 0, z: 0 };
     for (let i = 0; i < this.data.length; i++) {
       if (this.data[i] === Mat.Air) continue;
@@ -395,6 +398,7 @@ export class VoxelShape {
       this.coords(i, c);
       this.layerSolid[c.y]++;
       this.rowSolid[c.y * this.sz + c.z]++;
+      this.chunkSolid[this.chunkIndexAt(c.x, c.y, c.z)]++;
     }
     this.solidCount = n;
     return n;

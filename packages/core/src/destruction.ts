@@ -325,7 +325,12 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
       const region: VoxelRegion = { x0: x1, y0: y1, z0: z1, x1: x0, y1: y0, z1: z0 };
 
       for (let y = y0; y < y1; y++) {
+        // Пустые слои и строки перешагиваем: кисть заряда верхней ступени
+        // накрывает под сотню тысяч клеток в каждой форме, и почти все они
+        // воздух. Считать по ним ослабление — чистая потеря кадра.
+        if (shape.solidInLayer(y) === 0) continue;
         for (let z = z0; z < z1; z++) {
+          if (shape.solidInRow(y, z) === 0) continue;
           const rowBase = (y * shape.sz + z) * shape.sx;
           for (let x = x0; x < x1; x++) {
             if (result.removed >= maxVoxels) break;

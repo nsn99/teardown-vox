@@ -15,6 +15,13 @@ export interface RendererOptions {
   chunkSize?: number;
   /** Сколько чанков перестраиваем за кадр. */
   remeshBudget?: number;
+  /**
+   * Потолок времени на ремеш в кадре, мс. Чанк чанку рознь: пустой
+   * строится мгновенно, а угол склада — это шесть проходов по 32³
+   * клеткам. Считать бюджет в штуках — значит иногда потратить кадр
+   * целиком, поэтому решает время.
+   */
+  remeshMs?: number;
   /** Дальность прорисовки, м. */
   viewDistance?: number;
 }
@@ -59,16 +66,18 @@ export class VoxelRenderer {
   private glassMaterial: THREE.MeshStandardMaterial;
   private chunkSize: number;
   private remeshBudget: number;
+  private remeshMs: number;
   private aoStrength: number;
   private seenShapes = new Set<number>();
 
   /** Метрики последнего кадра — для перф-регрессии. */
-  stats = { chunks: 0, remeshed: 0, quads: 0, triangles: 0 };
+  stats = { chunks: 0, remeshed: 0, dirty: 0, quads: 0, triangles: 0 };
 
   constructor(opts: RendererOptions) {
     const quality = QUALITY[opts.quality ?? 'medium'];
     this.chunkSize = opts.chunkSize ?? 32;
     this.remeshBudget = opts.remeshBudget ?? 6;
+    this.remeshMs = opts.remeshMs ?? 4;
     this.aoStrength = quality.ao;
 
     this.renderer = new THREE.WebGLRenderer({
@@ -303,6 +312,7 @@ export class VoxelRenderer {
     const dirty: ChunkEntry[] = [];
     for (const c of this.chunks.values()) if (c.dirty) dirty.push(c);
     this.stats.chunks = this.chunks.size;
+    this.stats.dirty = dirty.length;
     if (dirty.length === 0) {
       this.stats.remeshed = 0;
       return;
@@ -319,8 +329,16 @@ export class VoxelRenderer {
     );
 
     const budget = Math.min(this.remeshBudget, dirty.length);
-    for (let i = 0; i < budget; i++) this.rebuild(dirty[i]);
-    this.stats.remeshed = budget;
+    const until = performance.now() + this.remeshMs;
+    let done = 0;
+    for (let i = 0; i < budget; i++) {
+      this.rebuild(dirty[i]);
+      done++;
+      // Ближний чанк всегда строим хотя бы один: иначе дыра, в которую
+      // игрок смотрит, могла бы не появиться совсем.
+      if (performance.now() > until) break;
+    }
+    this.stats.remeshed = done;
   }
 
   private rebuild(entry: ChunkEntry): void {

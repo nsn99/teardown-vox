@@ -8,3 +8,4 @@ export * from './vehicles.js';
 export * from './level.js';
 export * from './heist.js';
 export * from './levels/port.js';
+export * from './audio.js';

@@ -66,7 +66,7 @@ function run(
     // режим намеренно размазывает работу по кадрам, и сравнивать надо
     // то, чем всё кончилось, а не сколько успелось к четвёртому проходу.
     let quiet = 0;
-    for (let i = 0; i < 60 && quiet < 2; i++) {
+    for (let i = 0; i < 24 && quiet < 2; i++) {
       const res = stepStructure(sim.world, opts);
       passes++;
       const moved = res.fragments.length + res.detachedVoxels + res.dustVoxels + res.stressFailures;
@@ -76,7 +76,7 @@ function run(
       dust += res.dustVoxels;
       failures += res.stressFailures;
     }
-    expect(passes).toBeLessThan(120);
+    expect(passes).toBeLessThan(72);
   }
   return { fragments, detached, dust, failures, carved, voxels: sim.world.totalSolidVoxels() };
 }

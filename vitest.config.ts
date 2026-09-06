@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts'],
+    // Перф-регрессия идёт отдельным прогоном: под инструментовкой покрытия
+    // тот же меш считается вчетверо дольше, и мерить там нечего.
+    exclude: ['packages/game/test/perf.test.ts', '**/node_modules/**', '**/dist/**'],
     environment: 'node',
     coverage: {
       provider: 'v8',

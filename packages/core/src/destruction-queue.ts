@@ -10,6 +10,14 @@ export interface DestructionQueueOptions {
   voxelBudget?: number;
   /** Больше этого числа заданий в очереди не копим: старые вытесняются. */
   maxJobs?: number;
+  /**
+   * Потолок времени на разбор очереди, мс.
+   *
+   * Одного счётчика вокселей мало: кисть заряда верхней ступени накрывает
+   * сотни тысяч клеток, из которых снимаются единицы, и вся цена — в
+   * обходе, а не в удалении. Время ловит и это.
+   */
+  timeBudgetMs?: number;
 }
 
 interface Job {
@@ -22,6 +30,7 @@ interface Job {
 const DEFAULTS = {
   voxelBudget: 12000,
   maxJobs: 64,
+  timeBudgetMs: 6,
 } satisfies Required<DestructionQueueOptions>;
 
 export interface FlushResult {
@@ -72,6 +81,7 @@ export class DestructionQueue {
     const results: CarveResult[] = [];
     let left = budget;
     let removed = 0;
+    const until = this.cfg.timeBudgetMs > 0 ? performance.now() + this.cfg.timeBudgetMs : Infinity;
 
     while (left > 0 && this.jobs.length > 0) {
       const job = this.jobs[0];
@@ -83,6 +93,8 @@ export class DestructionQueue {
       left -= res.removed;
       // Не упёрлись в потолок — значит кисть выбрана до конца.
       if (res.removed < ask) this.jobs.shift();
+      // Время кончилось — остальное в следующий кадр.
+      if (performance.now() > until) break;
     }
 
     return { results, removed, pending: this.jobs.length };
@@ -93,7 +105,8 @@ export class DestructionQueue {
     const results: CarveResult[] = [];
     let removed = 0;
     for (let i = 0; i < maxRounds && this.jobs.length > 0; i++) {
-      const r = this.flush(world);
+      // Дожимаем без оглядки на время: это досчёт, а не кадр.
+      const r = this.flush(world, this.cfg.voxelBudget * 8);
       results.push(...r.results);
       removed += r.removed;
     }

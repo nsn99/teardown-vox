@@ -79,6 +79,27 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
     };
   }
 
+  // Пустой чанк не мешается вовсе: в полой коробке склада таких большинство,
+  // а шесть проходов по 32³ клеткам стоят как настоящая работа.
+  if (r && opts.originAtRegion) {
+    const chunk = shape.chunkIndexAt(lo[0], lo[1], lo[2]);
+    const bounds = shape.chunkBounds(chunk);
+    if (
+      bounds.x0 === lo[0] &&
+      bounds.y0 === lo[1] &&
+      bounds.z0 === lo[2] &&
+      shape.solidInChunk(chunk) === 0
+    ) {
+      return {
+        positions: new Float32Array(0),
+        normals: new Float32Array(0),
+        colors: new Float32Array(0),
+        indices: new Uint32Array(0),
+        quads: 0,
+      };
+    }
+  }
+
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
@@ -107,12 +128,18 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
     return m !== Mat.Air && !isTransparent(m);
   };
 
-  const colorOf = (x: number, y: number, z: number, mat: number, ao: number): [number, number, number] => {
+  // Буфер цвета один на весь проход: массив на каждую видимую грань —
+  // это десятки тысяч короткоживущих объектов на один чанк.
+  const rgb = [0, 0, 0];
+  const colorOf = (x: number, y: number, z: number, mat: number, ao: number): number[] => {
     const i = shape.idx(x, y, z);
     const painted = shape.paint.get(i);
     const base = painted !== undefined ? (paint[painted % paint.length] ?? paint[0]) : MATERIALS[mat].color;
     const shade = 1 - aoStrength * (1 - ao / 3);
-    return [(base[0] / 255) * shade, (base[1] / 255) * shade, (base[2] / 255) * shade];
+    rgb[0] = (base[0] / 255) * shade;
+    rgb[1] = (base[1] / 255) * shade;
+    rgb[2] = (base[2] / 255) * shade;
+    return rgb;
   };
 
   const pos = [0, 0, 0];
@@ -125,13 +152,15 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
     const hu = hi[u] - lo[u];
     const hv = hi[v] - lo[v];
 
+    const maskMat = new Int32Array(hu * hv);
+    const maskAo = new Int32Array(hu * hv);
+    const maskCol = new Float32Array(hu * hv * 3);
+
     for (const dir of [-1, 1] as const) {
-      // Маска одного среза: 0 — грани нет, иначе ключ материала и затенения.
-      const maskMat = new Int32Array(hu * hv);
-      const maskAo = new Int32Array(hu * hv);
-      const maskCol = new Float32Array(hu * hv * 3);
 
       for (let slice = lo[d]; slice < w; slice++) {
+        // Слой без единого твёрдого вокселя граней не даёт.
+        if (d === 1 && shape.solidInLayer(slice) === 0) continue;
         maskMat.fill(0);
 
         for (let j = 0; j < hv; j++) {
@@ -139,6 +168,9 @@ export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
             pos[d] = slice;
             pos[u] = lo[u] + i;
             pos[v] = lo[v] + j;
+            // В строке (y,z) вообще нет твёрдых вокселей — значит и грани
+            // здесь взяться неоткуда. Проверка дешевле, чем visible().
+            if (shape.solidInRow(pos[1], pos[2]) === 0) continue;
             const mat = visible(pos[0], pos[1], pos[2]);
             if (mat === Mat.Air) continue;
 
@@ -250,6 +282,19 @@ function sameColor(mask: Float32Array, a: number, b: number): boolean {
  * Затенение в четырёх углах грани по классической воксельной схеме:
  * два соседа по краям и один по диагонали.
  */
+/** Смещения углов грани: (du, dv) четырёх вершин. */
+const AO_CORNERS: ReadonlyArray<readonly [number, number]> = [
+  [-1, -1],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+];
+
+/** Результат затенения — один на всё меширование: считается и сразу читается. */
+const aoOut = { key: 0, mean: 0 };
+const aoQ = [0, 0, 0];
+const aoCorners = [0, 0, 0, 0];
+
 function cornerAo(
   pos: number[],
   d: number,
@@ -258,30 +303,39 @@ function cornerAo(
   dir: number,
   solid: (x: number, y: number, z: number) => boolean,
 ): { key: number; mean: number } {
-  const p = [pos[0], pos[1], pos[2]];
-  const sample = (du: number, dv: number): boolean => {
-    const q = [p[0], p[1], p[2]];
-    q[d] += dir;
-    q[u] += du;
-    q[v] += dv;
-    return solid(q[0], q[1], q[2]);
-  };
-
-  const corners: number[] = [];
-  for (const [cu, cv] of [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ] as const) {
-    const side1 = sample(cu, 0);
-    const side2 = sample(0, cv);
-    const corner = sample(cu, cv);
-    corners.push(side1 && side2 ? 0 : 3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0)));
+  for (let k = 0; k < 4; k++) {
+    const cu = AO_CORNERS[k][0];
+    const cv = AO_CORNERS[k][1];
+    const side1 = sampleAo(pos, d, u, v, dir, cu, 0, solid);
+    const side2 = sampleAo(pos, d, u, v, dir, 0, cv, solid);
+    const corner = sampleAo(pos, d, u, v, dir, cu, cv, solid);
+    aoCorners[k] = side1 && side2 ? 0 : 3 - ((side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0));
   }
+  const corners = aoCorners;
   const key = corners[0] * 64 + corners[1] * 16 + corners[2] * 4 + corners[3];
   const mean = (corners[0] + corners[1] + corners[2] + corners[3]) / 4;
-  return { key, mean };
+  aoOut.key = key;
+  aoOut.mean = mean;
+  return aoOut;
+}
+
+function sampleAo(
+  pos: number[],
+  d: number,
+  u: number,
+  v: number,
+  dir: number,
+  du: number,
+  dv: number,
+  solid: (x: number, y: number, z: number) => boolean,
+): boolean {
+  aoQ[0] = pos[0];
+  aoQ[1] = pos[1];
+  aoQ[2] = pos[2];
+  aoQ[d] += dir;
+  aoQ[u] += du;
+  aoQ[v] += dv;
+  return solid(aoQ[0], aoQ[1], aoQ[2]);
 }
 
 function emitQuad(

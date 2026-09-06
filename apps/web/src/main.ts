@@ -1,5 +1,6 @@
 import {
   PROFILE_STORAGE_KEY,
+  AudioDirector,
   Heist,
   NEUTRAL_INPUT,
   Profile,
@@ -9,6 +10,7 @@ import {
 } from '@tvox/game';
 import { RapierPhysics, add, carve, clamp, explode, stepStructure, v3 } from '@tvox/core';
 import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
 
@@ -18,6 +20,9 @@ const renderer = new VoxelRenderer({ canvas, quality: 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
 renderer.scene.add(particles.points, fireLights.group);
+const audio = new AudioDirector();
+const player = new AudioPlayer();
+let audioOff: (() => void) | null = null;
 
 const input = new Input({ canvas });
 const hud = new Hud();
@@ -91,6 +96,10 @@ function startRun(inSandbox: boolean): void {
   heist.start();
   wireEvents(heist);
   upgradeToRapier(heist);
+
+  audioOff?.();
+  audioOff = audio.listen(heist.sim.world);
+  player.resume();
 
   menu.hide();
   result.hide();
@@ -212,6 +221,12 @@ function handleActions(h: Heist): void {
     if (n > 0) hud.message(`Подорвано зарядов: ${n}`, 1.5);
   }
 
+  if (input.take('KeyM')) {
+    const off = audio.toggleMute();
+    player.setMuted(off);
+    hud.message(off ? 'Звук выключен' : 'Звук включён', 1.2);
+  }
+
   if (input.take('KeyR')) startRun(sandbox);
 
   if (input.take('Escape')) {
@@ -275,6 +290,16 @@ function frame(now: number): void {
     if (Math.random() < 0.06) particles.emitFire(p.position, p.heat);
   }
 
+  // Слушатель — там же, где камера: звук должен приходить оттуда, куда
+  // игрок смотрит, а не из начала координат.
+  player.play(
+    audio.update(dt, h.eye, {
+      alarmActive: h.mission.alarmActive,
+      timeLeft: h.mission.timeLeft,
+      alarmSeconds: h.level.mission.alarmSeconds ?? 60,
+    }),
+  );
+
   renderer.setCamera(h.eye, h.yaw, h.pitch);
   renderer.sync(h.sim.world);
   renderer.render();
@@ -332,6 +357,8 @@ window.tvox = {
 };
 
 canvas.addEventListener('click', () => {
+  // Браузер пускает звук только после жеста — клик по канвасу и есть жест.
+  player.resume();
   if (!paused && !input.locked) input.requestLock();
 });
 
