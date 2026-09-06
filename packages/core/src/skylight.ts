@@ -90,6 +90,12 @@ export class SkyLight {
    * знать, что творится над коробкой, обязательно. Растекание идёт с
    * запасом по краям — иначе на границе пересчитанной области остаётся
    * шов из старых значений.
+   *
+   * А вот вверх запас нужен маленький. Свет идёт сверху вниз: пробоина в
+   * стене на высоте метра не меняет освещённость под крышей, и трогать
+   * там нечего. Поэтому пересчитывается всё, что ниже изменений, плюс
+   * пятнадцать вокселей над ними — ровно столько, сколько свет способен
+   * пролезть вверх боковым растеканием.
    */
   rebuild(region: VoxelRegion): void {
     const m = SKY_MAX;
@@ -97,19 +103,20 @@ export class SkyLight {
     const x1 = Math.min(this.shape.sx, region.x1 + m);
     const z0 = Math.max(0, region.z0 - m);
     const z1 = Math.min(this.shape.sz, region.z1 + m);
+    const yTop = Math.min(this.shape.sy, region.y1 + m);
 
-    // Обнуляем полосу целиком по высоте: свет, пришедший сюда сбоку,
-    // мог родиться где угодно, и «подправить на месте» его нельзя.
-    for (let y = 0; y < this.shape.sy; y++) {
+    // Обнуляем полосу до самого низа: свет из дыры в крыше падает
+    // колонкой до пола, и «подправить на месте» его нельзя.
+    for (let y = 0; y < yTop; y++) {
       for (let z = z0; z < z1; z++) {
         const row = (y * this.shape.sz + z) * this.shape.sx;
         this.levels.fill(0, row + x0, row + x1);
       }
     }
 
-    this.seed(x0, x1, z0, z1);
+    this.seed(x0, x1, z0, z1, yTop);
     // Свет с краёв полосы затекает обратно внутрь: ставим их в очередь.
-    this.seedBorder(x0, x1, z0, z1);
+    this.seedBorder(x0, x1, z0, z1, yTop);
     this.spread();
   }
 
@@ -121,10 +128,10 @@ export class SkyLight {
    * Без этого застеклённый офис внутри чёрный, а через ворота склада не
    * видно ничего.
    */
-  private seed(x0: number, x1: number, z0: number, z1: number): void {
-    this.columns(x0, x1, z0, z1);
+  private seed(x0: number, x1: number, z0: number, z1: number, yTop = this.shape.sy): void {
+    this.columns(x0, x1, z0, z1, yTop);
 
-    const { sx, sy, sz, data } = this.shape;
+    const { sx, sz, data } = this.shape;
     const open = (x: number, y: number, z: number): void => {
       const i = (y * sz + z) * sx + x;
       if (this.levels[i] === SKY_MAX) return;
@@ -136,7 +143,7 @@ export class SkyLight {
     for (let z = z0; z < z1; z++) {
       for (let x = x0; x < x1; x++) open(x, 0, z);
     }
-    for (let y = 0; y < sy; y++) {
+    for (let y = 0; y < yTop; y++) {
       for (let z = z0; z < z1; z++) {
         if (x0 === 0) open(0, y, z);
         if (x1 === sx) open(sx - 1, y, z);
@@ -149,7 +156,7 @@ export class SkyLight {
   }
 
   /** Колонки сверху вниз: небо светит, пока не упрётся в непрозрачное. */
-  private columns(x0: number, x1: number, z0: number, z1: number): void {
+  private columns(x0: number, x1: number, z0: number, z1: number, yTop: number): void {
     const { sx, sy, sz, data } = this.shape;
     for (let z = z0; z < z1; z++) {
       for (let x = x0; x < x1; x++) {
@@ -158,6 +165,9 @@ export class SkyLight {
           const i = (y * sz + z) * sx + x;
           if (level > 0 && !passes(data[i], this.transparent)) level = 0;
           if (level === 0) break;
+          // Выше пересчитываемой полосы значения и так верные: свет туда
+          // приходит из тех же колонок и не зависит от того, что внизу.
+          if (y >= yTop) continue;
           this.levels[i] = level;
           if (level === SKY_MAX) this.buckets[level].push(i);
         }
@@ -166,15 +176,15 @@ export class SkyLight {
   }
 
   /** Поставить в очередь всё, что уже светится по краям полосы. */
-  private seedBorder(x0: number, x1: number, z0: number, z1: number): void {
-    const { sx, sy, sz } = this.shape;
+  private seedBorder(x0: number, x1: number, z0: number, z1: number, yTop: number): void {
+    const { sx, sz } = this.shape;
     const push = (x: number, y: number, z: number): void => {
       if (x < 0 || z < 0 || x >= sx || z >= sz) return;
       const i = (y * sz + z) * sx + x;
       const l = this.levels[i];
       if (l > 1) this.buckets[l].push(i);
     };
-    for (let y = 0; y < sy; y++) {
+    for (let y = 0; y < yTop; y++) {
       for (let z = z0 - 1; z <= z1; z++) {
         push(x0 - 1, y, z);
         push(x1, y, z);
@@ -182,6 +192,12 @@ export class SkyLight {
       for (let x = x0; x < x1; x++) {
         push(x, y, z0 - 1);
         push(x, y, z1);
+      }
+    }
+    // Крышка полосы: свет сверху обязан затечь вниз, в обнулённое.
+    if (yTop < this.shape.sy) {
+      for (let z = z0; z < z1; z++) {
+        for (let x = x0; x < x1; x++) push(x, yTop, z);
       }
     }
   }

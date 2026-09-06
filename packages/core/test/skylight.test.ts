@@ -141,27 +141,50 @@ describe('небесный свет', () => {
     expect(field.of(s)).not.toBe(a);
   });
 
-  it('расчёт склада укладывается в разумное время', () => {
-    // Размер настоящего склада «Порта»: 200×80×160 вокселей.
+  it('склад настоящего размера считается и светит через дыру', () => {
+    // Размер настоящего склада «Порта»: 200×80×160 вокселей. Миллисекунды
+    // здесь не меряются намеренно: бюджеты живут в отдельном прогоне со
+    // своим запасом, а тут они превращались бы в мигающий тест на общем
+    // раннере — что однажды и произошло.
     const s = new VoxelShape({ sx: 200, sy: 80, sz: 160, voxelSize: 0.1, name: 'склад' });
     s.fill({}, Mat.Brick);
     s.fill({ x0: 3, y0: 3, z0: 3, x1: 197, y1: 79, z1: 157 }, Mat.Air);
 
-    const t0 = performance.now();
     const sky = new SkyLight(s);
-    const bake = performance.now() - t0;
+    expect(sky.at(100, 40, 80)).toBe(0);
 
     const region = { x0: 90, y0: 76, z0: 70, x1: 110, y1: 80, z1: 90 };
     s.fill(region, Mat.Air);
-    const t1 = performance.now();
     sky.rebuild(region);
-    const patch = performance.now() - t1;
-
-    console.log(`небесный свет: полный ${bake.toFixed(1)} мс, кусок ${patch.toFixed(1)} мс`);
-    // Полный расчёт платится один раз на загрузке, кусок — в кадре.
-    // Абсолютные числа тут условные, ловушка на регрессию в разы.
-    expect(bake).toBeLessThan(2000);
-    expect(patch).toBeLessThan(120);
     expect(sky.at(100, 4, 80)).toBe(SKY_MAX);
+  });
+
+  it('дыра в стене не заставляет пересчитывать всё, что выше', () => {
+    // Свет приходит сверху: пробоина внизу не меняет освещённость под
+    // крышей. Пересчёт обязан это использовать, иначе каждый удар
+    // кувалдой по стене стоит как полный расчёт здания.
+    const s = new VoxelShape({ sx: 64, sy: 96, sz: 64, voxelSize: 0.1, name: 'башня' });
+    s.fill({}, Mat.Concrete);
+    s.fill({ x0: 1, y0: 1, z0: 1, x1: 63, y1: 95, z1: 63 }, Mat.Air);
+    // Световой фонарь наверху: под ним светло, внизу темно.
+    s.fill({ x0: 28, y0: 95, z0: 28, x1: 36, y1: 96, z1: 36 }, Mat.Air);
+    const sky = new SkyLight(s);
+    const topBefore = sky.at(32, 90, 32);
+    expect(topBefore).toBe(SKY_MAX);
+
+    const hole = { x0: 0, y0: 4, z0: 20, x1: 1, y1: 10, z1: 26 };
+    s.fill(hole, Mat.Air);
+    sky.rebuild(hole);
+
+    // Верх не тронут, низ у пробоины освещён.
+    expect(sky.at(32, 90, 32)).toBe(topBefore);
+    expect(sky.at(2, 6, 23)).toBeGreaterThan(0);
+
+    // И всё это совпадает с полным расчётом — оптимизация не имеет права
+    // экономить за счёт правильности.
+    const full = new SkyLight(s);
+    let diff = 0;
+    for (let i = 0; i < s.volume; i++) if (full.levels[i] !== sky.levels[i]) diff++;
+    expect(diff).toBe(0);
   });
 });
