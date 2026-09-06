@@ -176,6 +176,7 @@ export class VoxelRenderer {
   /** Лампы с неподвижной тенью: обновляются по перестройке геометрии. */
   private staticShadows: THREE.SpotLight[] = [];
   private lastShadowRefresh = 0;
+  private quality: Quality;
   private shadowSize: number;
   private skyFloor = { value: 0.24 };
   private voxelUniform = { value: 0.1 };
@@ -191,6 +192,7 @@ export class VoxelRenderer {
     this.remeshMs = opts.remeshMs ?? 4;
     this.aoStrength = quality.ao;
     this.shadowSize = quality.shadowMap;
+    this.quality = opts.quality ?? 'medium';
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: opts.canvas,
@@ -417,9 +419,75 @@ export class VoxelRenderer {
     this.renderer.setSize(width, height, false);
   }
 
-  setCamera(position: { x: number; y: number; z: number }, yaw: number, pitch: number): void {
+  setCamera(
+    position: { x: number; y: number; z: number },
+    yaw: number,
+    pitch: number,
+    roll = 0,
+  ): void {
     this.camera.position.set(position.x, position.y, position.z);
-    this.camera.rotation.set(pitch, yaw, 0, 'YXZ');
+    this.camera.rotation.set(pitch, yaw, roll, 'YXZ');
+  }
+
+  /**
+   * Атмосфера вокруг камеры: вода и дым.
+   *
+   * И то и другое — один и тот же приём: подменить туман и цвет фона.
+   * Под водой картинка синеет и садится по дальности, в дыму — сереет.
+   * Дёшево, обратимо и читается мгновенно, а главное — не требует ни
+   * одного дополнительного прохода отрисовки.
+   */
+  setAtmosphere(state: { underwater: boolean; smoke: number }): void {
+    const p = DAYLIGHT[this.daylight];
+    const smoke = clamp01(state.smoke);
+    const fog = this.scene.fog as THREE.Fog;
+
+    if (state.underwater) {
+      const color = new THREE.Color(0x0d3a4a);
+      this.scene.background = color;
+      fog.color = color;
+      fog.near = 0.4;
+      fog.far = 14;
+      this.renderer.toneMappingExposure = p.exposure * 0.8;
+      return;
+    }
+
+    // Дым садится в туман: чем гуще завеса, тем ближе подступает серая
+    // стена. Дальность видимости падает обратно плотности, а не линейно:
+    // вдвое гуще — вдвое ближе. Линейная смесь от трёхсот метров почти
+    // ничего не меняла бы до самой сплошной завесы.
+    const smokeColor = new THREE.Color(0x8b8f94);
+    const base = new THREE.Color(p.sky);
+    this.scene.background = base.clone().lerp(smokeColor, Math.min(1, smoke * 1.4));
+    fog.color = (this.scene.background as THREE.Color).clone();
+    const far = smoke < 0.02 ? this.camera.far : Math.min(this.camera.far, 7 / smoke);
+    fog.far = far;
+    fog.near = Math.min(p.fogNear, far * 0.12);
+    this.renderer.toneMappingExposure = p.exposure * lerp(1, 0.8, smoke);
+  }
+
+  /** Качество на лету: без пересоздания сцены и без перезагрузки. */
+  setQuality(quality: Quality): void {
+    const q = QUALITY[quality];
+    this.quality = quality;
+    this.aoStrength = q.ao;
+    this.shadowSize = q.shadowMap;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+    this.renderer.shadowMap.enabled = q.shadowMap > 0;
+    this.sun.castShadow = q.shadowMap > 0;
+    if (q.shadowMap > 0) this.sun.shadow.mapSize.set(q.shadowMap, q.shadowMap);
+    for (const l of this.staticShadows) {
+      l.castShadow = q.shadowMap > 0;
+      l.shadow.needsUpdate = true;
+    }
+    // Затенение в углах запечено в вершинах, поэтому смена качества
+    // требует пересборки мешей — но не пересборки сцены.
+    for (const c of this.chunks.values()) c.dirty = true;
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  get currentQuality(): Quality {
+    return this.quality;
   }
 
   /**
@@ -743,6 +811,9 @@ export class VoxelRenderer {
     this.renderer.dispose();
   }
 }
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 /** Задевает ли область освещения чанк. */
 function touches(r: VoxelRegion, c: { cx: number; cy: number; cz: number }, cs: number): boolean {

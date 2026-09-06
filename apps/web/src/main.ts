@@ -10,7 +10,7 @@ import {
   portLevel,
   toolBySlot,
 } from '@tvox/game';
-import { RapierPhysics, add, carve, clamp, explode, stepStructure, v3 } from '@tvox/core';
+import { RapierPhysics, add, carve, clamp, explode, scale, stepStructure, v3 } from '@tvox/core';
 import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
@@ -243,6 +243,13 @@ function handleActions(h: Heist): void {
     }
   }
 
+  if (input.take('KeyQ')) {
+    const order = ['low', 'medium', 'high'] as const;
+    const next = order[(order.indexOf(renderer.currentQuality) + 1) % order.length];
+    renderer.setQuality(next);
+    hud.message(`Качество: ${next === 'low' ? 'низкое' : next === 'medium' ? 'среднее' : 'высокое'}`, 1.4);
+  }
+
   if (input.take('KeyN')) {
     const order = ['day', 'dusk', 'night'] as const;
     const next = order[(order.indexOf(renderer.time) + 1) % order.length];
@@ -359,7 +366,31 @@ function frame(now: number): void {
     }),
   );
 
-  renderer.setCamera(cameraEye(h), h.yaw, h.pitch);
+  // Дым вокруг головы: он же уводит прицел, он же садит видимость.
+  const eye = h.eye;
+  const haze = clamp(
+    h.sim.smoke.densityAt(eye) * 0.6 +
+      h.sim.smoke.opacityAlong(eye, add(eye, scale(h.aimDirection, 12))) * 0.5,
+    0,
+    1,
+  );
+  renderer.setAtmosphere({ underwater: h.character.inWater, smoke: haze });
+
+  // Дым живёт в симуляции, а частицы — картинка поверх него: берём
+  // облака оттуда, а не выдумываем заново.
+  let clouds = 0;
+  for (const c of h.sim.smoke.clouds()) {
+    if (c.density < 0.25 || clouds++ > 24) continue;
+    if (Math.random() < c.density * 0.25) particles.emitSmoke(c.position, 1, 1.6);
+  }
+
+  const shake = h.shakeState;
+  renderer.setCamera(
+    add(cameraEye(h), shake.offset),
+    h.yaw + shake.yaw,
+    h.pitch + shake.pitch,
+    shake.roll,
+  );
   renderer.sync(h.sim.world);
   renderer.render();
 

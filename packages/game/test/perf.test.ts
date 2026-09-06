@@ -8,7 +8,7 @@ import {
   explode,
   stepStructure,
 } from '@tvox/core';
-import { meshShape } from '@tvox/render';
+import { ParticleSystem, meshShape } from '@tvox/render';
 import { TOOLS, portLevel } from '@tvox/game';
 
 /**
@@ -45,6 +45,10 @@ const BUDGET = {
   destruction: 90 * slack,
   /** Пересчёт небесного света после удара. */
   skylight: 60 * slack,
+  /** Шаг дыма и запрос видимости сквозь него. */
+  smoke: 6 * slack,
+  /** Шаг частиц при полном буфере. */
+  particles: 4 * slack,
 };
 
 const profile: Record<string, number> = {};
@@ -216,6 +220,64 @@ describe('перф-бюджеты', () => {
     expect(med).toBeLessThan(BUDGET.fire);
   });
 
+  it('дым не съедает кадр', () => {
+    const sim = scene();
+    // Задымляем половину карты: столько дыма в игре не бывает, но
+    // ловушка на регрессию должна ловить с запасом.
+    for (let i = 0; i < 2000; i++) {
+      sim.smoke.emit(
+        { x: (i % 48) + 0.5, y: ((i / 48) % 12) + 0.5, z: ((i / 576) % 36) + 0.5 },
+        0.4 + (i % 7) * 0.08,
+      );
+    }
+    profile['дым: ячеек'] = sim.smoke.size;
+
+    const eye = { x: 24, y: 2, z: 18 };
+    const far = { x: 24, y: 2, z: 40 };
+    const times: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const t = performance.now();
+      sim.smoke.step(1 / 60);
+      sim.smoke.opacityAlong(eye, far);
+      times.push(performance.now() - t);
+    }
+    const med = median(times);
+    profile['дым: шаг и видимость, мс'] = round(med);
+    expect(med).toBeLessThan(BUDGET.smoke);
+  });
+
+  it('частицы не съедают кадр при массовом обрушении', () => {
+    const sim = scene();
+    const particles = new ParticleSystem({ capacity: 6000 });
+
+    // Забиваем буфер под завязку тем, что рождается при обвале.
+    const res = explode(sim.world, {
+      center: BLAST_AT,
+      radius: TOP_CHARGE.radius,
+      power: TOP_CHARGE.power,
+      cause: 'perf',
+    });
+    for (let i = 0; i < 40; i++) {
+      particles.emitDebris(res.debris, 1.5);
+      particles.emitSmoke({ x: 14, y: 3, z: 22 }, 6, 1.2);
+      particles.emitSparks({ x: 14, y: 3, z: 22 }, 12);
+    }
+    profile['частиц в буфере'] = particles.count;
+
+    const times: number[] = [];
+    for (let i = 0; i < 90; i++) {
+      const t = performance.now();
+      particles.step(1 / 60);
+      times.push(performance.now() - t);
+    }
+    const med = median(times);
+    profile['частицы: шаг, мс'] = round(med);
+    // Выборка обломков ограничена в ядре, поэтому буфер не растёт с
+    // объёмом разрушения — сколько ни взрывай, цена шага та же.
+    expect(particles.count).toBeLessThanOrEqual(6000);
+    expect(med).toBeLessThan(BUDGET.particles);
+  });
+
   it('профиль сохраняется файлом', () => {
     profile['режим'] = CI ? 1 : 0;
     const payload = {
@@ -226,7 +288,7 @@ describe('перф-бюджеты', () => {
     };
     writeFileSync('perf.json', `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     // Файл имеет смысл только если в нём есть все замеры.
-    expect(Object.keys(profile).length).toBeGreaterThanOrEqual(11);
+    expect(Object.keys(profile).length).toBeGreaterThanOrEqual(15);
   });
 });
 

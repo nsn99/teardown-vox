@@ -9,6 +9,7 @@ export * from './level.js';
 export * from './heist.js';
 export * from './levels/port.js';
 export * from './audio.js';
+export * from './aim.js';
 export * from './camera.js';
 export * from './pursuit.js';
 export * from './level-doc.js';

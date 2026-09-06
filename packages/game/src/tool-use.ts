@@ -18,12 +18,18 @@ import {
   sub,
   v3,
 } from '@tvox/core';
+import { aimThroughSmoke } from './aim.js';
 import { Inventory } from './inventory.js';
 import { ToolId, toolStats } from './tools.js';
 
 export interface ToolContext {
   sim: Simulation;
   inventory: Inventory;
+  /**
+   * Случайность прицела. Нужна там, где на попадание влияет дым: без
+   * внешнего сида результат нельзя ни повторить, ни проверить.
+   */
+  rng?: () => number;
   /** Точка глаз игрока. */
   origin: Vec3;
   /** Направление взгляда, нормализованное. */
@@ -73,10 +79,20 @@ export function useTool(ctx: ToolContext): ToolUseResult {
   const inv = ctx.inventory;
   const id = inv.active;
   const stats = inv.activeStats;
-  const dir = normalize(ctx.direction);
 
   if (inv.cooldown(id) > 0) return fail(id, 'cooldown');
   if (!inv.canUse(id)) return fail(id, 'no-ammo');
+
+  // Дым уводит руку. Считается один раз, до всех веток: инструменты
+  // отличаются тем, что делают с точкой, а не тем, как её ищут.
+  const aim = aimThroughSmoke(
+    ctx.sim.smoke,
+    ctx.origin,
+    ctx.direction,
+    stats.range,
+    ctx.rng ?? Math.random,
+  );
+  const dir = aim.direction;
 
   const world = ctx.sim.world;
   const hit = world.raycast(ctx.origin, dir, {

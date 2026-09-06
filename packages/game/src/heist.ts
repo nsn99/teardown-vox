@@ -6,10 +6,13 @@ import {
   SimulationOptions,
   Vec3,
   add,
+  distance,
+  makeRng,
   normalize,
   scale,
   v3,
 } from '@tvox/core';
+import { CameraShake, ShakeState } from './camera.js';
 import { CharacterController, CharacterInput, overlapsSolid } from './character.js';
 import { Inventory } from './inventory.js';
 import { LevelSource, TriggerDef, TriggerSystem } from './level.js';
@@ -25,6 +28,8 @@ export interface HeistOptions {
   /** Песочница: без таймера, без расходников, без начисления денег. */
   sandbox?: boolean;
   simulation?: SimulationOptions;
+  /** Сид захода: с одним сидом два прогона идут одинаково. */
+  seed?: number;
 }
 
 export interface HeistEvents extends Record<string, unknown> {
@@ -51,6 +56,9 @@ export const DEFAULT_INPUT: CharacterInput = {
 /** Дальность взятия цели руками, м. */
 export const REACH = 2.4;
 
+/** Меньше этого числа снятых вокселей камеру не трясёт. */
+const SHAKE_MIN_VOXELS = 60;
+
 /**
  * Игровой цикл ограбления: связывает физическое ядро, миссию, инвентарь,
  * персонажа и технику. Приложение дёргает только update() и хэндлеры ввода,
@@ -66,6 +74,18 @@ export class Heist {
   readonly planks = new PlankBuilder();
   /** Вертолёт и катер: то, чем кончается таймер. */
   readonly pursuit: Pursuit;
+  /**
+   * Тряска камеры. Живёт в игре, а не в приложении: от чего трясёт —
+   * это игровое решение, и оно проверяется тестом.
+   */
+  readonly shake = new CameraShake();
+  /** Состояние тряски на текущий кадр. */
+  shakeState: ShakeState = { offset: v3(), yaw: 0, pitch: 0, roll: 0 };
+  /**
+   * Случайность захода. Сидированная: заход, который нельзя повторить,
+   * нельзя ни разобрать, ни проверить тестом.
+   */
+  private rng: () => number;
   readonly events = new EventBus<HeistEvents>();
   readonly level: LevelSource;
   readonly profile: Profile;
@@ -83,6 +103,7 @@ export class Heist {
   private resultApplied = false;
 
   constructor(opts: HeistOptions) {
+    this.rng = makeRng(opts.seed ?? 0x7ea12d);
     this.level = opts.level;
     this.sandbox = opts.sandbox ?? false;
     this.profile = opts.profile ?? new Profile();
@@ -106,6 +127,24 @@ export class Heist {
       ...(opts.level.pursuit ? { specs: opts.level.pursuit } : {}),
       voxelSize: opts.level.voxelSize,
       waterLevel: opts.level.waterLevel,
+    });
+    this.watchShake();
+  }
+
+  /**
+   * От чего трясёт: от взрыва и от того, что на землю прилетела плита.
+   * Порог по числу вокселей не даёт трястись от каждого удара кувалдой —
+   * иначе тряска перестаёт что-либо значить.
+   */
+  private watchShake(): void {
+    this.sim.world.events.on('voxels:removed', (e) => {
+      if (e.count < SHAKE_MIN_VOXELS) return;
+      const d = distance(e.center, this.playerPosition);
+      this.shake.add(Math.min(0.75, e.count / 900), d, 45);
+    });
+    this.sim.world.events.on('impact', (e) => {
+      const d = distance(e.point, this.playerPosition);
+      this.shake.add(Math.min(0.35, e.impulse / 4000), d, 25);
     });
   }
 
@@ -284,6 +323,7 @@ export class Heist {
       ignoreBodies: this.ignoredBodies(),
       protect: this.protectedMaterials(),
       paintColor: 0,
+      rng: this.rng,
     };
   }
 
@@ -424,6 +464,7 @@ export class Heist {
     // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
     this.sim.focus = this.playerPosition;
     this.sim.step(dt);
+    this.shakeState = this.shake.update(dt);
 
     // Несомая цель едет вместе с игроком, чуть впереди на уровне груди.
     const holdAt = add(this.eye, scale(this.aimDirection, 1.1));
@@ -485,6 +526,8 @@ export class Heist {
   }
 
   restart(): void {
+    this.shake.reset();
+    this.shakeState = { offset: v3(), yaw: 0, pitch: 0, roll: 0 };
     this.mission.restart();
     this.pursuit.reset(this.sim);
     this.triggers.reset();

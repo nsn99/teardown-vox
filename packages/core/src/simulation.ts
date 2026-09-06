@@ -2,6 +2,7 @@ import { Vec3, v3 } from './math.js';
 import { VoxelWorld, WorldOptions } from './world.js';
 import { PhysicsBackend, SimplePhysics, SimplePhysicsOptions } from './physics.js';
 import { FireOptions, FireSystem } from './fire.js';
+import { SmokeField, SmokeOptions } from './smoke.js';
 import {
   StructureOptions,
   StructureResult,
@@ -17,6 +18,7 @@ export interface SimulationOptions {
   world?: WorldOptions;
   physics?: SimplePhysicsOptions;
   fire?: FireOptions;
+  smoke?: SmokeOptions;
   structure?: StructureOptions;
   /** Шаг физики, с. Фиксированный — иначе разрушения недетерминированы. */
   fixedStep?: number;
@@ -64,6 +66,11 @@ export interface SimStepStats {
 export class Simulation {
   readonly world: VoxelWorld;
   readonly fire: FireSystem;
+  /**
+   * Дым. Не украшение: он гасит видимость и уводит прицел, поэтому живёт
+   * в симуляции рядом с огнём, а не в частицах приложения.
+   */
+  readonly smoke: SmokeField;
   readonly fixedStep: number;
   /** Очередь отложенного разрушения: большой взрыв растекается по кадрам. */
   readonly destruction: DestructionQueue;
@@ -91,6 +98,7 @@ export class Simulation {
         ? opts.backend(this.world)
         : (opts.backend ?? new SimplePhysics(this.world, opts.physics));
     this.fire = new FireSystem(opts.fire);
+    this.smoke = new SmokeField(opts.smoke);
     this.fixedStep = opts.fixedStep ?? 1 / 60;
     this.maxSteps = opts.maxStepsPerFrame ?? 5;
     this.structureEvery = opts.structureEveryNSteps ?? 2;
@@ -98,6 +106,13 @@ export class Simulation {
     this.structureOpts = opts.structure ?? {};
     this.destruction = new DestructionQueue(opts.destruction);
     this.debrisOpts = opts.debris ?? {};
+
+    // Дым родится там же, где рождается разрушение: подписка вместо
+    // ручных вызовов из десяти мест, где что-то ломается.
+    this.world.events.on('voxels:removed', (e) => {
+      if (e.count > 0) this.smoke.emitFromDestruction(e.center, e.count);
+    });
+    this.world.events.on('fire:ignited', (e) => this.smoke.emit(e.point, 0.25));
   }
 
   get physics(): PhysicsBackend {
@@ -139,6 +154,7 @@ export class Simulation {
 
       this.backend.step(this.fixedStep);
       burning = this.fire.step(this.world, this.fixedStep).burning;
+      this.smoke.step(this.fixedStep);
 
       if (this.stepIndex % this.structureEvery === 0 && this.stepIndex >= this.structureNextStep) {
         const t0 = performance.now();
@@ -225,6 +241,7 @@ export class Simulation {
     for (const b of [...this.world.bodies.values()]) this.world.removeBody(b);
     this.world.collectGarbage();
     this.fire.reset();
+    this.smoke.clear();
     this.accumulator = 0;
     this.stepIndex = 0;
     this.structureNextStep = 0;

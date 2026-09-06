@@ -202,6 +202,37 @@ try {
     }
   });
 
+  await step('дым садит видимость и рассеивается', async () => {
+    // Дым — данные, а не спрайты: проверяем это тем же способом, что и
+    // свет. Задымляем воздух перед камерой и смотрим, что кадр сел.
+    // Наружу, на открытое место: в тёмном зале туман мерить бессмысленно,
+    // там и без дыма ничего не видно дальше десяти метров.
+    await page.evaluate(() => window.tvox.look(24, 1.7, 13, 0, -0.05));
+    await settleMesh(page);
+    const clear = await meanLuminance(await page.screenshot({ type: 'png' }));
+
+    const cells = await page.evaluate(() => {
+      const smoke = window.tvox.heist.sim.smoke;
+      for (let i = 0; i < 600; i++) {
+        smoke.emit({ x: 18 + (i % 14), y: 1 + ((i / 14) % 5), z: 3 + ((i / 70) % 10) }, 1);
+      }
+      return smoke.size;
+    });
+    if (cells <= 0) throw new Error('Дым не встал');
+    await page.waitForTimeout(700);
+    const hazy = await meanLuminance(await page.screenshot({ type: 'png' }));
+    await page.screenshot({ path: join(outDir, '06-smoke.png') });
+
+    if (clear < 0) {
+      steps.push('дым: замер пропущен, нет графической библиотеки');
+      return;
+    }
+    steps.push(`дым: ${cells} ячеек, яркость ${clear.toFixed(4)} → ${hazy.toFixed(4)}`);
+    if (Math.abs(hazy - clear) < 0.01) {
+      throw new Error(`Дым ничего не изменил: ${clear.toFixed(4)} → ${hazy.toFixed(4)}`);
+    }
+  });
+
   await step('кадр держится в бюджете при активном разрушении', async () => {
     // Мерить один структурный проход бессмысленно: он неделим и намеренно
     // отодвигает следующий. Игрока волнует кадр, поэтому меряем кадры —

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Body, Mat, VoxelShape, VoxelWorld, v3 } from '@tvox/core';
-import { chaseCamera, lookDirection } from '@tvox/game';
+import { CameraShake, chaseCamera, lookDirection } from '@tvox/game';
 
 /**
  * Камера от третьего лица.
@@ -88,3 +88,84 @@ describe('камера от третьего лица', () => {
     expect(Math.hypot(t.x, t.y, t.z)).toBeCloseTo(1, 6);
   });
 });
+
+describe('тряска камеры', () => {
+  it('в покое камера стоит', () => {
+    const shake = new CameraShake();
+    const s = shake.update(1 / 60);
+    expect(shake.level).toBe(0);
+    expect(s.offset).toEqual(v3());
+    expect(s.roll).toBe(0);
+  });
+
+  it('близкий взрыв трясёт сильнее далёкого', () => {
+    const near = new CameraShake();
+    const far = new CameraShake();
+    near.add(1, 2);
+    far.add(1, 25);
+    expect(near.level).toBeGreaterThan(far.level);
+    expect(far.level).toBeGreaterThan(0);
+  });
+
+  it('за краем радиуса не трясёт вовсе', () => {
+    const shake = new CameraShake();
+    shake.add(1, 60, 30);
+    expect(shake.level).toBe(0);
+  });
+
+  it('тряска затухает сама и не копится выше предела', () => {
+    const shake = new CameraShake({ recovery: 1 });
+    for (let i = 0; i < 10; i++) shake.add(1, 0);
+    expect(shake.level).toBe(1);
+
+    let biggest = 0;
+    for (let i = 0; i < 60; i++) {
+      const s = shake.update(1 / 60);
+      biggest = Math.max(biggest, Math.hypot(s.offset.x, s.offset.y, s.offset.z));
+    }
+    // За секунду восстановления травма ушла в ноль.
+    expect(shake.level).toBe(0);
+    // И пока она была, камера двигалась в разумных пределах.
+    expect(biggest).toBeGreaterThan(0.01);
+    expect(biggest).toBeLessThan(0.3);
+  });
+
+  it('слабая встряска почти не двигает картинку', () => {
+    const weak = new CameraShake();
+    const strong = new CameraShake();
+    weak.add(0.2, 0);
+    strong.add(1, 0);
+    const w = amplitude(weak);
+    const s = amplitude(strong);
+    // Квадрат травмы: разница в пять раз по силе даёт разницу на порядок.
+    expect(s / Math.max(w, 1e-9)).toBeGreaterThan(8);
+  });
+
+  it('тряска повторяема: два одинаковых события дают одно и то же', () => {
+    const a = new CameraShake();
+    const b = new CameraShake();
+    a.add(0.8, 3);
+    b.add(0.8, 3);
+    for (let i = 0; i < 20; i++) {
+      expect(a.update(1 / 60)).toEqual(b.update(1 / 60));
+    }
+  });
+
+  it('сброс возвращает камеру в покой', () => {
+    const shake = new CameraShake();
+    shake.add(1, 0);
+    shake.reset();
+    expect(shake.level).toBe(0);
+    expect(shake.update(1 / 60).offset).toEqual(v3());
+  });
+});
+
+/** Наибольшее смещение за полсекунды. */
+function amplitude(shake: CameraShake): number {
+  let biggest = 0;
+  for (let i = 0; i < 30; i++) {
+    const s = shake.update(1 / 60);
+    biggest = Math.max(biggest, Math.hypot(s.offset.x, s.offset.y, s.offset.z));
+  }
+  return biggest;
+}
