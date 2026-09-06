@@ -292,13 +292,34 @@ export class ChargeSystem {
     const c = this.charges.get(id);
     if (!c) return false;
     this.charges.delete(id);
-    explode(sim.world, {
+
+    // Воронку выгрызаем сразу, но не больше кадрового бюджета: заряд
+    // верхней ступени в плотной кладке снимает сотни тысяч вокселей, и
+    // одним куском это провал кадра на четверть секунды. Остаток доедает
+    // очередь в следующих кадрах — на глаз это по-прежнему один хлопок.
+    const budget = sim.destruction.budget;
+    const res = explode(sim.world, {
       center: c.position,
       radius: c.radius,
       power: c.power,
       cause: 'explosive',
       protect,
+      maxVoxels: budget,
     });
+    if (res.removed >= budget) {
+      sim.destruction.enqueue(
+        { kind: 'sphere', center: c.position, radius: c.radius },
+        {
+          power: c.power,
+          damage: 0,
+          instant: true,
+          falloff: 'quadratic',
+          cause: 'explosive',
+          protect,
+        },
+      );
+    }
+
     sim.physics.applyRadialImpulse(c.position, c.radius * 2, this.impulse);
     sim.fire.igniteArea(sim.world, c.position, c.radius * 0.8, 1);
     sim.settle();

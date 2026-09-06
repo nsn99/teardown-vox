@@ -125,6 +125,7 @@ export class VoxelShape {
    */
   readonly dirtyMeshChunks = new Set<number>();
   readonly dirtyStructureChunks = new Set<number>();
+  readonly dirtyColliderChunks = new Set<number>();
 
   /** Размер сетки чанков. */
   readonly chunksX: number;
@@ -137,6 +138,13 @@ export class VoxelShape {
    * изменений, а в свежезагруженной карте может висеть что угодно.
    */
   structureScanned = false;
+
+  /**
+   * Форма участвует в структурном анализе. Грунт — не участвует: он весь
+   * на якоре, консолей в нём нет, а считать по нему напряжения — это пять
+   * миллионов клеток на ровном месте.
+   */
+  structural = true;
 
   private solidCount = 0;
   /** Непустых вокселей в каждом слое y — чтобы пропускать пустые слои. */
@@ -308,6 +316,7 @@ export class VoxelShape {
     const chunk = this.chunkIndexAt(x, y, z);
     this.dirtyMeshChunks.add(chunk);
     this.dirtyStructureChunks.add(chunk);
+    this.dirtyColliderChunks.add(chunk);
     // Список изменений — вход инкрементального структурного анализа.
     // Переполнился — значит изменений столько, что полный проход дешевле.
     if (this.changedVoxels.length >= CHANGE_LIMIT) this.changedOverflow = true;
@@ -340,6 +349,11 @@ export class VoxelShape {
   clearStructureDirty(): void {
     this.dirtyStructure = emptyRegion();
     this.dirtyStructureChunks.clear();
+  }
+
+  /** Снять пометку с чанков, коллайдеры которых уже пересобраны. */
+  consumeColliderChunks(chunks: Iterable<number>): void {
+    for (const c of chunks) this.dirtyColliderChunks.delete(c);
   }
 
   /**

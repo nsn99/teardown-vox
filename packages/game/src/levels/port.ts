@@ -434,10 +434,15 @@ export const portLevel: LevelSource = {
   mission: PORT_MISSION,
 
   build(sim: Simulation): Body[] {
+    const ground = buildGround();
+    // Грунт держится сам: он весь на неразрушимом фундаменте, консолей в
+    // нём нет. Считать по нему напряжения — пять миллионов клеток впустую.
+    ground.structural = false;
+
     const level = new Body({
       kind: 'static',
       shapes: [
-        buildGround(),
+        ground,
         buildWarehouse(),
         buildOffice(),
         buildCrane(),
@@ -461,8 +466,11 @@ export const portLevel: LevelSource = {
     });
 
     // Уровень строится «как задумано»: если что-то в нём не держится,
-    // это баг геометрии, а не сюрприз для игрока.
+    // это баг геометрии, а не сюрприз для игрока. Заодно прогреваем
+    // структурный анализ, пока идёт загрузка: иначе первый удар по карте
+    // оплатит полный проход по всем формам разом.
     for (const s of level.shapes) s.clearStructureDirty();
+    sim.primeStructure();
     return [level, water, ...targets];
   },
 };

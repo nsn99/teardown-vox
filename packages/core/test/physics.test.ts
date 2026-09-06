@@ -231,7 +231,13 @@ describe('Simulation: фиксированный шаг', () => {
   });
 
   it('обрушение внутри шага порождает динамическое тело', () => {
-    const sim = new Simulation({ fixedStep: 1 / 60, structureEveryNSteps: 1 });
+    // structureBudgetMs: 0 отключает самопланирование: в игре дорогой
+    // проход отодвигает следующий, а здесь нужен ровный шаг за шагом.
+    const sim = new Simulation({
+      fixedStep: 1 / 60,
+      structureEveryNSteps: 1,
+      structureBudgetMs: 0,
+    });
     const s = new VoxelShape({ sx: 9, sy: 12, sz: 9, voxelSize: VS, grounded: false });
     s.fill({ y0: 0, y1: 1 }, Mat.Foundation);
     s.fill({ x0: 4, x1: 5, y0: 1, y1: 8, z0: 4, z1: 5 }, Mat.Concrete);

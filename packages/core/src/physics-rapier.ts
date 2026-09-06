@@ -3,6 +3,7 @@ import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 import { VoxelShape } from './voxel-shape.js';
 import { ColliderBox, buildColliders, decomposeCoarse } from './collider.js';
+import { VoxelRegion } from './voxel-shape.js';
 import { PhysicsBackend } from './physics.js';
 import { carve } from './destruction.js';
 
@@ -59,6 +60,13 @@ interface Entry {
   body: Body;
   rb: import('@dimforge/rapier3d-compat').RigidBody;
   colliders: import('@dimforge/rapier3d-compat').Collider[];
+  /**
+   * Коллайдеры по чанкам: ключ «id формы : индекс чанка». Разрушение
+   * задевает один чанк, и пересобрать надо только его — иначе удар по
+   * складу тянет за собой декомпозицию всего уровня, а это четверть
+   * секунды в кадре.
+   */
+  chunkColliders: Map<string, import('@dimforge/rapier3d-compat').Collider[]>;
   /** Скорость до шага — из неё считается импульс удара. */
   prevVelocity: Vec3;
   /** Импульс последнего шага, кг·м/с. */
@@ -167,6 +175,7 @@ export class RapierPhysics implements PhysicsBackend {
       body,
       rb,
       colliders: [],
+      chunkColliders: new Map(),
       prevVelocity: v3(),
       lastImpulse: 0,
       lastSpeedDrop: 0,
@@ -177,38 +186,98 @@ export class RapierPhysics implements PhysicsBackend {
     body.collidersDirty = false;
   }
 
+  /** Полная пересборка: все чанки всех форм тела. */
   private buildColliders(entry: Entry): void {
-    const R = this.RAPIER;
     for (const c of entry.colliders) this.rapierWorld.removeCollider(c, false);
     entry.colliders.length = 0;
+    entry.chunkColliders.clear();
 
     for (const shape of entry.body.shapes) {
       if (shape.solidVoxels === 0) continue;
-      const boxes = this.boxesFor(shape);
-      const density = averageDensity(shape);
-      for (const b of boxes) {
-        const local = v3(b.cx, b.cy, b.cz);
-        const world = add(shape.transform.position, rotateVec(shape.transform.rotation, local));
-        const desc = R.ColliderDesc.cuboid(b.hx, b.hy, b.hz)
-          .setTranslation(world.x, world.y, world.z)
-          .setRotation(shape.transform.rotation)
-          .setDensity(density)
-          .setFriction(0.8)
-          .setRestitution(0.05);
-        // Урон от удара считаем только для свободно летящих обломков.
-        // Кинематическая техника давит на опору с огромной силой просто
-        // потому, что стоит на ней, — из этого нельзя делать воронку.
-        if (entry.body.kind === 'dynamic' && !entry.body.kinematic) {
-          desc.setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS);
-          desc.setContactForceEventThreshold(this.cfg.contactForceThreshold);
-        }
-        entry.colliders.push(this.rapierWorld.createCollider(desc, entry.rb));
+      for (let chunk = 0; chunk < shape.chunkCount; chunk++) {
+        this.buildChunk(entry, shape, chunk);
       }
+      shape.dirtyColliderChunks.clear();
     }
   }
 
-  private boxesFor(shape: VoxelShape): ColliderBox[] {
-    const opts = { maxBoxes: this.cfg.maxBoxesPerShape };
+  /**
+   * Пересобрать коллайдеры одного чанка формы.
+   *
+   * Возвращает, сколько боксов получилось. Старые коллайдеры этого чанка
+   * снимаются, соседние не трогаются: шов между чанками физике не важен,
+   * боксы просто стыкуются гранями.
+   */
+  private buildChunk(entry: Entry, shape: VoxelShape, chunk: number): number {
+    const R = this.RAPIER;
+    const key = `${shape.id}:${chunk}`;
+    const old = entry.chunkColliders.get(key);
+    if (old) {
+      for (const c of old) {
+        this.rapierWorld.removeCollider(c, false);
+        const i = entry.colliders.indexOf(c);
+        if (i >= 0) entry.colliders.splice(i, 1);
+      }
+      entry.chunkColliders.delete(key);
+    }
+    if (shape.solidVoxels === 0) return 0;
+
+    const region = shape.chunkBounds(chunk);
+    const boxes = this.boxesFor(shape, region);
+    if (boxes.length === 0) return 0;
+
+    const density = cachedDensity(shape);
+    const made: import('@dimforge/rapier3d-compat').Collider[] = [];
+    for (const b of boxes) {
+      const local = v3(b.cx, b.cy, b.cz);
+      const world = add(shape.transform.position, rotateVec(shape.transform.rotation, local));
+      const desc = R.ColliderDesc.cuboid(b.hx, b.hy, b.hz)
+        .setTranslation(world.x, world.y, world.z)
+        .setRotation(shape.transform.rotation)
+        .setDensity(density)
+        .setFriction(0.8)
+        .setRestitution(0.05);
+      // Урон от удара считаем только для свободно летящих обломков.
+      // Кинематическая техника давит на опору с огромной силой просто
+      // потому, что стоит на ней, — из этого нельзя делать воронку.
+      if (entry.body.kind === 'dynamic' && !entry.body.kinematic) {
+        desc.setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS);
+        desc.setContactForceEventThreshold(this.cfg.contactForceThreshold);
+      }
+      const collider = this.rapierWorld.createCollider(desc, entry.rb);
+      made.push(collider);
+      entry.colliders.push(collider);
+    }
+    entry.chunkColliders.set(key, made);
+    return made.length;
+  }
+
+  /** Пересборка только задетых чанков. Возвращает их число. */
+  private rebuildDirtyChunks(entry: Entry, budget: number): number {
+    let done = 0;
+    for (const shape of entry.body.shapes) {
+      if (shape.dirtyColliderChunks.size === 0) continue;
+      const taken: number[] = [];
+      for (const chunk of shape.dirtyColliderChunks) {
+        if (done >= budget) break;
+        this.buildChunk(entry, shape, chunk);
+        taken.push(chunk);
+        done++;
+      }
+      shape.consumeColliderChunks(taken);
+      if (done >= budget) break;
+    }
+    return done;
+  }
+
+  private dirtyChunkCount(body: Body): number {
+    let n = 0;
+    for (const shape of body.shapes) n += shape.dirtyColliderChunks.size;
+    return n;
+  }
+
+  private boxesFor(shape: VoxelShape, region?: VoxelRegion): ColliderBox[] {
+    const opts = { maxBoxes: this.cfg.maxBoxesPerShape, region };
     return shape.solidVoxels > this.cfg.coarseAbove
       ? decomposeCoarse(shape, this.cfg.coarseFactor, opts)
       : buildColliders(shape, opts);
@@ -257,16 +326,25 @@ export class RapierPhysics implements PhysicsBackend {
       if (!this.world.bodies.has(id) || entry.body.destroyed) this.remove(entry.body);
     }
 
-    // Пересборка коллайдеров идёт с бюджетом: разрушение стены не должно
-    // превращаться в кадр на полсекунды.
+    // Пересборка коллайдеров идёт с бюджетом и по чанкам: разрушение стены
+    // не должно превращаться в кадр на полсекунды.
     let rebuilt = 0;
     while (this.pending.length > 0 && rebuilt < this.cfg.rebuildBudget) {
       const body = this.pending.shift()!;
       const entry = this.entries.get(body.id);
       if (!entry || body.destroyed) continue;
-      this.buildColliders(entry);
+      if (this.dirtyChunkCount(body) > 0) {
+        rebuilt += this.rebuildDirtyChunks(entry, this.cfg.rebuildBudget - rebuilt);
+        // Не всё влезло в бюджет — тело остаётся в очереди на следующий шаг.
+        if (this.dirtyChunkCount(body) > 0) {
+          this.pending.push(body);
+          break;
+        }
+      } else {
+        this.buildColliders(entry);
+        rebuilt++;
+      }
       body.collidersDirty = false;
-      rebuilt++;
     }
 
     // Запоминаем скорости до шага: удар — это её резкая потеря.
@@ -384,4 +462,30 @@ export function averageDensity(shape: VoxelShape): number {
   const s = shape.voxelSize;
   const volume = solids * s * s * s;
   return shape.mass() / volume;
+}
+
+interface DensityCache {
+  solids: number;
+  value: number;
+}
+
+const densityCache = new WeakMap<VoxelShape, DensityCache>();
+
+/**
+ * Та же средняя плотность, но с памятью.
+ *
+ * mass() — проход по всем вокселям формы. При пересборке коллайдеров по
+ * чанкам это стоило пять миллионов клеток на каждый чанк грунта, то есть
+ * десяток секунд на загрузке. Плотность пересчитывается, только когда
+ * заметно поменялось число вокселей: смесь материалов меняется медленно,
+ * а точность здесь нужна для инерции, а не для баллистики.
+ */
+function cachedDensity(shape: VoxelShape): number {
+  const solids = shape.solidVoxels;
+  if (solids === 0) return 1;
+  const hit = densityCache.get(shape);
+  if (hit && Math.abs(hit.solids - solids) <= hit.solids * 0.1) return hit.value;
+  const value = averageDensity(shape);
+  densityCache.set(shape, { solids, value });
+  return value;
 }

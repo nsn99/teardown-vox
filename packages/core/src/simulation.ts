@@ -1,7 +1,17 @@
+import { Vec3, v3 } from './math.js';
 import { VoxelWorld, WorldOptions } from './world.js';
 import { PhysicsBackend, SimplePhysics, SimplePhysicsOptions } from './physics.js';
 import { FireOptions, FireSystem } from './fire.js';
-import { StructureOptions, StructureResult, stepStructure } from './structure.js';
+import {
+  StructureOptions,
+  StructureResult,
+  computeAnchored,
+  computeStress,
+  findLooseComponents,
+  stepStructure,
+} from './structure.js';
+import { DestructionQueue, DestructionQueueOptions } from './destruction-queue.js';
+import { DebrisCapOptions, capDebris } from './debris.js';
 
 export interface SimulationOptions {
   world?: WorldOptions;
@@ -15,10 +25,22 @@ export interface SimulationOptions {
   /** Структурный анализ реже физики: он дорогой, а обвал не обязан быть мгновенным. */
   structureEveryNSteps?: number;
   /**
+   * Сколько миллисекунд кадра готовы отдать структурному анализу в
+   * среднем. Проход неделим, поэтому дорогой проход не режется, а
+   * отодвигает следующий: двадцать миллисекунд раз в десять шагов — это
+   * два миллисекунды на кадр, и обвал опаздывает на десятую долю секунды,
+   * чего никто не замечает.
+   */
+  structureBudgetMs?: number;
+  /**
    * Готовый бэкенд или фабрика по миру. Фабрика удобнее: мир создаётся
    * внутри симуляции, а бэкенду он нужен на конструирование.
    */
   backend?: PhysicsBackend | ((world: VoxelWorld) => PhysicsBackend);
+  /** Бюджет отложенного разрушения. */
+  destruction?: DestructionQueueOptions;
+  /** Потолок числа живых обломков. */
+  debris?: DebrisCapOptions;
 }
 
 export interface SimStepStats {
@@ -26,6 +48,12 @@ export interface SimStepStats {
   structure: StructureResult | null;
   burning: number;
   bodies: number;
+  /** Вокселей снято отложенным разрушением за этот кадр. */
+  carved: number;
+  /** Заданий разрушения осталось в очереди. */
+  carveQueue: number;
+  /** Обломков вморожено в статическую геометрию. */
+  frozen: number;
 }
 
 /**
@@ -37,6 +65,10 @@ export class Simulation {
   readonly world: VoxelWorld;
   readonly fire: FireSystem;
   readonly fixedStep: number;
+  /** Очередь отложенного разрушения: большой взрыв растекается по кадрам. */
+  readonly destruction: DestructionQueue;
+  /** Где игрок. От неё считается, какие обломки не жалко заморозить. */
+  focus: Vec3 = v3();
 
   private backend: PhysicsBackend;
 
@@ -45,6 +77,12 @@ export class Simulation {
   private structureOpts: StructureOptions;
   private maxSteps: number;
   private structureEvery: number;
+  private structureBudgetMs: number;
+  /** Шаг, раньше которого следующий структурный проход не начинаем. */
+  private structureNextStep = 0;
+  /** Длительность последнего структурного прохода, мс. */
+  lastStructureMs = 0;
+  private debrisOpts: DebrisCapOptions;
 
   constructor(opts: SimulationOptions = {}) {
     this.world = new VoxelWorld(opts.world);
@@ -56,7 +94,10 @@ export class Simulation {
     this.fixedStep = opts.fixedStep ?? 1 / 60;
     this.maxSteps = opts.maxStepsPerFrame ?? 5;
     this.structureEvery = opts.structureEveryNSteps ?? 2;
+    this.structureBudgetMs = opts.structureBudgetMs ?? 2;
     this.structureOpts = opts.structure ?? {};
+    this.destruction = new DestructionQueue(opts.destruction);
+    this.debrisOpts = opts.debris ?? {};
   }
 
   get physics(): PhysicsBackend {
@@ -79,6 +120,10 @@ export class Simulation {
 
   /** Продвинуть симуляцию на dt секунд реального времени. */
   step(dt: number): SimStepStats {
+    // Разрушение — первым делом и ровно на бюджет кадра: физика должна
+    // считать уже по новой геометрии, а не по вчерашней.
+    const carved = this.destruction.flush(this.world).removed;
+
     this.accumulator += dt;
     let steps = 0;
     let structure: StructureResult | null = null;
@@ -95,10 +140,20 @@ export class Simulation {
       this.backend.step(this.fixedStep);
       burning = this.fire.step(this.world, this.fixedStep).burning;
 
-      if (this.stepIndex % this.structureEvery === 0) {
+      if (this.stepIndex % this.structureEvery === 0 && this.stepIndex >= this.structureNextStep) {
+        const t0 = performance.now();
         const res = stepStructure(this.world, this.structureOpts);
+        this.lastStructureMs = performance.now() - t0;
         structure = mergeStructure(structure, res);
         for (const f of res.fragments) this.backend.sync(f.body);
+
+        // Дорогой проход отодвигает следующий ровно настолько, чтобы
+        // средняя цена кадра осталась в бюджете.
+        const skip =
+          this.structureBudgetMs > 0
+            ? Math.max(1, Math.ceil(this.lastStructureMs / this.structureBudgetMs))
+            : 1;
+        this.structureNextStep = this.stepIndex + skip;
       }
     }
 
@@ -108,7 +163,18 @@ export class Simulation {
       this.accumulator = this.fixedStep * this.maxSteps;
     }
 
-    return { steps, structure, burning, bodies: this.world.bodies.size };
+    const cap = capDebris(this.world, { ...this.debrisOpts, focus: this.focus });
+    for (const b of cap.bodies) this.backend.sync(b);
+
+    return {
+      steps,
+      structure,
+      burning,
+      bodies: this.world.bodies.size,
+      carved,
+      carveQueue: this.destruction.pending,
+      frozen: cap.frozen,
+    };
   }
 
   /** Немедленно посчитать структурную целостность (после взрыва). */
@@ -118,12 +184,51 @@ export class Simulation {
     return res;
   }
 
+  /**
+   * Прогреть структурный анализ по всей статике: полный проход по каждой
+   * форме, без правок геометрии.
+   *
+   * Без прогрева первый же удар по карте оплачивает полный проход по всем
+   * формам разом — на «Порту» это почти три секунды прямо в кадре. Здесь
+   * та же работа делается на загрузке, где секунда никого не удивляет, и
+   * дальше живёт только инкрементальный путь.
+   *
+   * Ничего не разрушает: найденные превышения возвращаются числом. Уровень,
+   * у которого их не ноль, спроектирован неправильно — на это есть тест.
+   */
+  primeStructure(): { shapes: number; failures: number; loose: number } {
+    let shapes = 0;
+    let failures = 0;
+    let loose = 0;
+    for (const body of this.world.bodies.values()) {
+      if (body.destroyed || body.passive || body.kind !== 'static') continue;
+      for (const shape of body.shapes) {
+        if (shape.solidVoxels === 0 || !shape.structural) continue;
+        shapes++;
+        failures += computeStress(shape, this.structureOpts).failures.length;
+        loose += findLooseComponents(shape, computeAnchored(shape)).length;
+        shape.structureScanned = true;
+        shape.clearStructureDirty();
+        shape.takeStructureChanges();
+      }
+    }
+    return { shapes, failures, loose };
+  }
+
+  /** Досчитать всё отложенное разрушение здесь и сейчас (итог миссии, тесты). */
+  finishDestruction(): number {
+    return this.destruction.drain(this.world).removed;
+  }
+
   reset(): void {
+    this.destruction.clear();
     for (const b of [...this.world.bodies.values()]) this.world.removeBody(b);
     this.world.collectGarbage();
     this.fire.reset();
     this.accumulator = 0;
     this.stepIndex = 0;
+    this.structureNextStep = 0;
+    this.lastStructureMs = 0;
     this.world.time = 0;
   }
 

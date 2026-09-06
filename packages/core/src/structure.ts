@@ -24,6 +24,11 @@ export interface StructureOptions {
   incremental?: boolean;
   /** Предел обхода при инкрементальном поиске якоря. Выше — полный проход. */
   incrementalVisitLimit?: number;
+  /**
+   * Потолок времени на проход, мс. Кончился — оставшиеся тела и чанки
+   * ждут следующего прохода. Ноль означает «без потолка».
+   */
+  timeBudgetMs?: number;
 }
 
 export interface FragmentInfo {
@@ -51,6 +56,7 @@ const DEFAULTS = {
   stress: true,
   incremental: true,
   incrementalVisitLimit: 20000,
+  timeBudgetMs: 6,
 } satisfies Required<StructureOptions>;
 
 /**
@@ -702,10 +708,11 @@ function collectSupportersBelow(shape: VoxelShape, x: number, y: number, z: numb
 const PARTIAL_STRESS_MIN_VOLUME = 1 << 19;
 /**
  * Запас вокруг задетых чанков. Нагрузка с повисшего куска расходится по
- * слою до ближайших опор; три метра запаса покрывают дыру от заряда, а
- * дальше уже дешевле считать всю форму.
+ * слою до ближайших опор, и почти всегда они рядом; а кусок, который
+ * границу всё-таки задел, не перераспределяется вовсе — см. cutByEdge.
+ * Поэтому запас держим скромным: он входит в сторону области квадратом.
  */
-const PARTIAL_STRESS_MARGIN = CHUNK_SIZE;
+const PARTIAL_STRESS_MARGIN = CHUNK_SIZE / 4;
 /** Разросся кусок больше этой доли формы — частичный проход не выгоден. */
 const PARTIAL_STRESS_MAX_FRACTION = 0.4;
 /**
@@ -851,7 +858,9 @@ export function extractFragment(
     },
     shapes: [fragShape],
     name: `${sourceBody.name}:frag`,
-    tags: [...sourceBody.tags].filter((t) => t !== 'level'),
+    // Метка обломка нужна потолку числа активных тел: замораживать
+    // разрешено только то, что отвалилось, а не технику и не цели.
+    tags: [...sourceBody.tags].filter((t) => t !== 'level').concat('debris'),
   });
   body.velocity = { ...sourceBody.velocity };
   body.angularVelocity = { ...sourceBody.angularVelocity };
@@ -886,11 +895,16 @@ export function solveBodyStructure(
 
   for (const shape of body.shapes) {
     if (shape.solidVoxels === 0) continue;
+    if (!shape.structural) {
+      shape.clearStructureDirty();
+      shape.takeStructureChanges();
+      continue;
+    }
     // Чистую форму пересчитывать незачем: её данные не менялись, а прошлый
     // проход уже сказал, что она стоит. Без этой проверки удар по складу
     // тянул за собой полный пересчёт грунта — пять миллионов клеток на
     // каждый чих.
-    if (shape.structureScanned && !shape.structureDirty) continue;
+    if (!shape.structureDirty) continue;
 
     if (cfg.stress) {
       const plan = cfg.incremental ? partialStressPlan(shape) : undefined;
@@ -970,12 +984,18 @@ export function stepStructure(
     stressFailures: 0,
   };
 
+  const cfg = { ...DEFAULTS, ...opts };
+  const started = cfg.timeBudgetMs > 0 ? performance.now() : 0;
+
   for (const body of [...world.bodies.values()]) {
     if (body.destroyed || body.passive) continue;
     // Динамические обломки в Teardown уже жёсткие: их не пересчитываем.
     if (body.kind !== 'static') continue;
     const dirty = body.shapes.some((s) => s.structureDirty);
     if (!dirty) continue;
+    // Кончилось время — остальные тела досчитаем в следующем проходе.
+    // Их чанки остаются грязными, ничего не теряется.
+    if (cfg.timeBudgetMs > 0 && performance.now() - started > cfg.timeBudgetMs) break;
 
     const res = solveBodyStructure(body, opts);
 

@@ -29,6 +29,8 @@ export interface SimplePhysicsOptions {
   maxSpeed?: number;
   /** Материалы, которые удар не разрушает (цели миссии). */
   protectedMaterials?: ReadonlySet<number>;
+  /** Радиус пробуждения соседей при ударе, м. */
+  wakeRadius?: number;
 }
 
 const DEFAULTS = {
@@ -40,6 +42,7 @@ const DEFAULTS = {
   impactDamageScale: 0.0016,
   maxSpeed: 120,
   protectedMaterials: new Set<number>(),
+  wakeRadius: 4,
 } satisfies Required<SimplePhysicsOptions>;
 
 /**
@@ -118,8 +121,26 @@ export class SimplePhysics implements PhysicsBackend {
       body.transform.position = add(body.transform.position, scale(body.velocity, dt));
 
       const box = body.aabb();
-      if (box.min.y < cfg.groundY) {
-        const penetration = cfg.groundY - box.min.y;
+
+      // Опора под телом: земля или верх воксельной геометрии. Второе —
+      // это и есть обвал второго порядка: плита пробивает перекрытие,
+      // перекрытие теряет опору и падает дальше.
+      let surfaceY = cfg.groundY;
+      let hitBody: Body | null = null;
+      let contactPoint = v3(
+        (box.min.x + box.max.x) / 2,
+        cfg.groundY,
+        (box.min.z + box.max.z) / 2,
+      );
+      const contact = this.supportBelow(body, box);
+      if (contact && contact.y > surfaceY) {
+        surfaceY = contact.y;
+        hitBody = contact.body;
+        contactPoint = contact.point;
+      }
+
+      if (box.min.y < surfaceY) {
+        const penetration = surfaceY - box.min.y;
         body.transform.position = add(body.transform.position, v3(0, penetration, 0));
 
         const impactSpeed = Math.abs(prev.y);
@@ -133,11 +154,7 @@ export class SimplePhysics implements PhysicsBackend {
         );
 
         if (impulse > cfg.impactThreshold) {
-          this.applyImpactDamage(body, null, v3(
-            (box.min.x + box.max.x) / 2,
-            cfg.groundY,
-            (box.min.z + box.max.z) / 2,
-          ), impulse);
+          this.applyImpactDamage(body, hitBody, contactPoint, impulse);
         }
       }
 
@@ -179,6 +196,10 @@ export class SimplePhysics implements PhysicsBackend {
       normal: v3(0, 1, 0),
     });
 
+    // Удар будит не только ударившего: соседняя стопка ящиков должна
+    // осыпаться, а не стоять как приклеенная.
+    this.wakeNear(point, this.cfg.wakeRadius + radius);
+
     carve(
       this.world,
       { kind: 'sphere', center: point, radius },
@@ -193,10 +214,62 @@ export class SimplePhysics implements PhysicsBackend {
     );
   }
 
+  /** Разбудить динамические тела вокруг точки. */
+  wakeNear(point: Vec3, radius: number): number {
+    let woken = 0;
+    for (const body of this.world.bodies.values()) {
+      if (body.destroyed || body.kind !== 'dynamic' || body.kinematic) continue;
+      if (!body.sleeping) continue;
+      if (distance(bodyCenter(body), point) > radius) continue;
+      body.wake();
+      woken++;
+    }
+    return woken;
+  }
+
+  /**
+   * Верх твёрдой геометрии под телом.
+   *
+   * Пробы идут сеткой по нижней грани: одной пробой по центру плита
+   * повисала бы углом на пустоте, а полноценный проход по вокселям под
+   * всей гранью в headless-дублёре не нужен — им занимается Rapier.
+   */
+  private supportBelow(
+    body: Body,
+    box: Aabb,
+  ): { y: number; body: Body; point: Vec3 } | null {
+    const fall = Math.abs(body.velocity.y) * 0.05;
+    const probe = Math.min(2, 0.12 + fall);
+    const ignore = new Set<number>([body.id]);
+    let best: { y: number; body: Body; point: Vec3 } | null = null;
+
+    for (let ix = 0; ix < PROBE_GRID; ix++) {
+      for (let iz = 0; iz < PROBE_GRID; iz++) {
+        const fx = (ix + 0.5) / PROBE_GRID;
+        const fz = (iz + 0.5) / PROBE_GRID;
+        const x = box.min.x + (box.max.x - box.min.x) * fx;
+        const z = box.min.z + (box.max.z - box.min.z) * fz;
+        const origin = v3(x, box.min.y + probe, z);
+        const hit = this.world.raycast(origin, v3(0, -1, 0), {
+          maxDistance: probe * 2,
+          ignore,
+          filter: (_mat, _shape, b) => b.kind !== 'dynamic' && !b.passive,
+        });
+        if (!hit) continue;
+        const y = origin.y - hit.distance;
+        if (!best || y > best.y) best = { y, body: hit.body, point: hit.point };
+      }
+    }
+    return best;
+  }
+
   dispose(): void {
     this.tracked.clear();
   }
 }
+
+/** Сторона сетки проб под телом. */
+const PROBE_GRID = 3;
 
 export function bodyCenter(body: Body): Vec3 {
   const box = body.aabb();

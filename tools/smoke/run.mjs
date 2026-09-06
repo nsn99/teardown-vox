@@ -81,13 +81,16 @@ page.on('response', (r) => {
 const steps = [];
 const step = async (name, fn) => {
   const t0 = Date.now();
+  process.stdout.write(`… ${name}\n`);
   await fn();
-  steps.push(`${name}: ${Date.now() - t0} мс`);
+  const dt = Date.now() - t0;
+  process.stdout.write(`  ✓ ${name}: ${dt} мс\n`);
+  steps.push(`${name}: ${dt} мс`);
 };
 
 try {
   await step('загрузка страницы', async () => {
-    await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+    await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForSelector('#menu:not([hidden])');
   });
   await page.screenshot({ path: join(outDir, '01-hub.png') });
@@ -134,6 +137,52 @@ try {
   });
   await page.screenshot({ path: join(outDir, '03-after.png') });
 
+  await step('кадр держится в бюджете при активном разрушении', async () => {
+    // Мерить один структурный проход бессмысленно: он неделим и намеренно
+    // отодвигает следующий. Игрока волнует кадр, поэтому меряем кадры —
+    // ровно во время того, как стена сыплется.
+    const res = await page.evaluate(async () => {
+      const h = window.tvox.heist;
+      const core = window.tvox.core;
+      const frames = [];
+      let carved = 0;
+      for (let i = 0; i < 90; i++) {
+        if (i % 9 === 0) {
+          carved += core.carve(
+            h.sim.world,
+            { kind: 'sphere', center: { x: 8 + (i / 9) * 0.8, y: 2.2, z: 14.1 }, radius: 0.7 },
+            { power: 1, damage: 0, instant: true, falloff: 'quadratic', cause: 'smoke' },
+          ).removed;
+        }
+        const t0 = performance.now();
+        h.sim.step(1 / 60);
+        frames.push(performance.now() - t0);
+      }
+      frames.sort((a, b) => a - b);
+      return {
+        carved,
+        median: frames[frames.length >> 1],
+        p95: frames[Math.floor(frames.length * 0.95)],
+        max: frames[frames.length - 1],
+        avg: frames.reduce((a, b) => a + b, 0) / frames.length,
+      };
+    });
+
+    if (res.carved <= 0) throw new Error('Замер бессмыслен: удары ничего не сняли');
+    // Кадр — 16.6 мс на всё. Симуляции (физика + огонь + структура)
+    // отводим половину; отдельные всплески допустимы, средняя цена — нет.
+    if (res.avg > 8) {
+      throw new Error(`Симуляция не в бюджете кадра: средняя ${res.avg.toFixed(2)} мс`);
+    }
+    if (res.p95 > 33) {
+      throw new Error(`Просадка кадра при разрушении: p95 ${res.p95.toFixed(2)} мс`);
+    }
+    steps.push(
+      `кадр симуляции при разрушении: средняя ${res.avg.toFixed(2)} мс, ` +
+        `медиана ${res.median.toFixed(2)}, p95 ${res.p95.toFixed(2)}, макс ${res.max.toFixed(2)}`,
+    );
+  });
+
   if (errors.length > 0) {
     throw new Error(`Ошибки в консоли:\n  ${errors.join('\n  ')}`);
   }
@@ -147,8 +196,11 @@ try {
   await page.screenshot({ path: join(outDir, 'fail.png') }).catch(() => {});
   process.exitCode = 1;
 } finally {
-  await browser.close();
+  await browser.close().catch(() => {});
   stop();
+  // Vite-предпросмотр умеет держать процесс живым и после SIGTERM,
+  // а CI не должен висеть на уже пройденном прогоне.
+  setTimeout(() => process.exit(process.exitCode ?? 0), 1500).unref();
 }
 
 /** Доля достаточно светлых пикселей в PNG. */

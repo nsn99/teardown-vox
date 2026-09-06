@@ -483,6 +483,8 @@ export interface ExplosionOptions {
   ignoreBodies?: ReadonlySet<number>;
   /** Материалы, которые взрыв не берёт (цели миссии). */
   protect?: ReadonlySet<number>;
+  /** Потолок вокселей за вызов: остаток доедает очередь отложенного разрушения. */
+  maxVoxels?: number;
 }
 
 /**
@@ -501,6 +503,7 @@ export function explode(world: VoxelWorld, opts: ExplosionOptions): CarveResult 
       cause: opts.cause ?? 'explosion',
       ignoreBodies: opts.ignoreBodies,
       protect: opts.protect,
+      maxVoxels: opts.maxVoxels,
     },
   );
 }

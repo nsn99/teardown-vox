@@ -280,6 +280,9 @@ export class Heist {
       this.character.update(this.sim.world, input, this.yaw, dt);
     }
 
+    // Потолок обломков считает «далеко» от игрока, а не от начала координат:
+    // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
+    this.sim.focus = this.playerPosition;
     this.sim.step(dt);
 
     // Несомая цель едет вместе с игроком, чуть впереди на уровне груди.

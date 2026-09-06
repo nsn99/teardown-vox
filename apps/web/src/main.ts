@@ -7,7 +7,7 @@ import {
   portLevel,
   toolBySlot,
 } from '@tvox/game';
-import { RapierPhysics, clamp, explode } from '@tvox/core';
+import { RapierPhysics, carve, clamp, explode, stepStructure } from '@tvox/core';
 import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -287,6 +287,8 @@ declare global {
       particles: ParticleSystem;
       /** Взрыв в точке прицела: быстрый способ проверить обрушение. */
       blast(radius?: number): number;
+      /** Кусок ядра для замеров из прогона: разрушение и структура. */
+      core: { carve: typeof carve; stepStructure: typeof stepStructure };
     };
   }
 }
@@ -308,6 +310,7 @@ window.tvox = {
     particles.emitDebris(res.debris, 1.5);
     return res.removed;
   },
+  core: { carve, stepStructure },
 };
 
 canvas.addEventListener('click', () => {
