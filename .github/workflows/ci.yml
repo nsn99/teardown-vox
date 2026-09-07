@@ -33,6 +33,22 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           node tools/smoke/run.mjs
+      - name: Что известно о падении
+        if: failure()
+        run: |
+          {
+            echo "### Где остановилась сборка"
+            echo ''
+            echo '```'
+            for f in perf.json coverage/index.html shots/smoke.log; do
+              if [ -e "$f" ]; then echo "есть: $f"; else echo "нет:  $f"; fi
+            done
+            echo ''
+            echo 'Скриншоты:'
+            ls shots/ 2>/dev/null || echo '  каталога нет'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v5
         if: always()
         with:
