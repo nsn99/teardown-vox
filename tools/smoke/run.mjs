@@ -191,20 +191,80 @@ try {
   }
   steps.push(`сцена: чанков ${mesh.chunks}, квадов ${mesh.quads.toLocaleString('ru-RU')}`);
 
+  await step('консоль после загрузки чиста', async () => {
+    // Раньше проверки картинки: если шейдер не собрался или контекст
+    // потерян, кадр будет чёрным — но причина в консоли, и знать её надо
+    // до того, как прогон скажет «темновато».
+    const gl = await page.evaluate(() => {
+      const r = window.tvox.renderer.renderer;
+      const ctx = r.getContext();
+      return {
+        lost: ctx.isContextLost(),
+        programs: r.info.programs?.length ?? -1,
+        geometries: r.info.memory.geometries,
+        textures: r.info.memory.textures,
+        calls: r.info.render.calls,
+        triangles: r.info.render.triangles,
+      };
+    });
+    steps.push(
+      `отрисовка: программ ${gl.programs}, геометрий ${gl.geometries}, ` +
+        `текстур ${gl.textures}, вызовов ${gl.calls}, треугольников ${gl.triangles}` +
+        (gl.lost ? ', КОНТЕКСТ ПОТЕРЯН' : ''),
+    );
+    if (gl.lost) throw new Error('Контекст WebGL потерян');
+    if (errors.length > 0) {
+      throw new Error(`Ошибки в консоли (${errors.length}):\n  ${errors.join('\n  ')}`);
+    }
+    if (gl.calls <= 0) throw new Error('Сцена не рисуется: ни одного вызова отрисовки');
+  });
+
   await step('сцена не чёрная', async () => {
     // WebGL-канвас без preserveDrawingBuffer отдаёт через toBlob пустоту,
     // поэтому яркость меряем по настоящему скриншоту.
+    // Днём, а не в сумерках: проверка ловит «на экране ничего нет», и
+    // мерить её надо в самом светлом из доступных режимов. Сумеречный
+    // фон сам по себе темнее порога — на нём эта проверка проверяла бы
+    // не сцену, а время суток.
+    const dusk = await page.evaluate(() => {
+      const r = window.tvox.renderer;
+      const was = r.time;
+      r.setDaylight('day');
+      return was;
+    });
+    await page.waitForTimeout(500);
     const png = await page.screenshot({ type: 'png' });
     const bright = await brightness(png);
     const mean = await meanLuminance(png);
+    await page.screenshot({ path: join(outDir, '02-day.png') });
+    await page.evaluate((back) => window.tvox.renderer.setDaylight(back), dusk);
+    await page.waitForTimeout(300);
     // Диапазон, а не минимум: залитый белым кадр — такая же поломка,
     // как и чёрный, просто с другой стороны. Границы широкие намеренно:
     // проверка ловит «нечего показывать», а не художественный замысел.
     // Узкий коридор здесь означал бы красный CI на каждую правку света.
-    if (bright < 0.1) throw new Error(`Кадр почти чёрный: доля светлых ${bright.toFixed(3)}`);
+    if (bright < 0.2) {
+      // Тёмный кадр при живой геометрии — это почти всегда шейдер.
+      // Проверяем прямо здесь: выключаем воксельные правки и меряем
+      // заново. Если без них картинка появилась, виноваты они, и в
+      // сводке это будет написано словами, а не намёком.
+      await page.evaluate(() => window.tvox.renderer.setVoxelShading(false));
+      await page.waitForTimeout(700);
+      const plainPng = await page.screenshot({ type: 'png' });
+      const plain = await brightness(plainPng);
+      await page.screenshot({ path: join(outDir, '02-plain.png') });
+      await page.evaluate(() => window.tvox.renderer.setVoxelShading(true));
+      throw new Error(
+        `Кадр почти чёрный: доля светлых ${bright.toFixed(3)}; ` +
+          `без воксельных правок шейдера ${plain.toFixed(3)}` +
+          (plain > bright * 3 ? ' — виноват шейдер' : ' — дело не в шейдере'),
+      );
+    }
     if (bright > 0.985) throw new Error(`Кадр пересвечен: доля светлых ${bright.toFixed(3)}`);
     if (mean >= 0 && mean < 0.02) throw new Error(`Кадр почти чёрный: средняя ${mean.toFixed(4)}`);
-    steps.push(`доля светлых точек: ${bright.toFixed(3)}, средняя яркость: ${mean.toFixed(4)}`);
+    steps.push(
+      `днём: доля светлых точек ${bright.toFixed(3)}, средняя яркость ${mean.toFixed(4)}`,
+    );
   });
 
   await step('разрушение и обрушение', async () => {

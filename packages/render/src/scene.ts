@@ -177,6 +177,7 @@ export class VoxelRenderer {
   private staticShadows: THREE.SpotLight[] = [];
   private lastShadowRefresh = 0;
   private quality: Quality;
+  private voxelShading = true;
   private shadowSize: number;
   private skyFloor = { value: 0.24 };
   private voxelUniform = { value: 0.1 };
@@ -280,6 +281,11 @@ export class VoxelRenderer {
    */
   private voxelMaterial(base: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
     base.onBeforeCompile = (shader) => {
+      // Выключатель на случай драйвера, который наши правки не переварит.
+      // Сцена без них теряет небесный свет и блики, но остаётся сценой —
+      // это лучше, чем чёрный экран, и заодно даёт прогону способ
+      // отличить «шейдер не собрался» от «просто темно».
+      if (!this.voxelShading) return;
       shader.uniforms.uSkyFloor = this.skyFloor;
       shader.uniforms.uVoxel = this.voxelUniform;
 
@@ -373,7 +379,7 @@ export class VoxelRenderer {
 
     // Ключ кэша программ обязан отличаться от стандартного: иначе THREE
     // подсунет сюда уже собранный шейдер без наших атрибутов.
-    base.customProgramCacheKey = () => 'tvox-voxel';
+    base.customProgramCacheKey = () => (this.voxelShading ? 'tvox-voxel' : 'tvox-plain');
     return base;
   }
 
@@ -484,11 +490,24 @@ export class VoxelRenderer {
     // стена. Дальность видимости падает обратно плотности, а не линейно:
     // вдвое гуще — вдвое ближе. Линейная смесь от трёхсот метров почти
     // ничего не меняла бы до самой сплошной завесы.
-    const smokeColor = new THREE.Color(0x8b8f94);
     const base = new THREE.Color(p.sky);
+    if (smoke < 0.02) {
+      // Чистый воздух — ровно то, что задано пресетом. Пересчитывать
+      // туман «почти как в пресете» значит незаметно менять картинку
+      // каждый кадр: один такой пересчёт уже утащил дальность тумана с
+      // шестидесяти метров на тридцать шесть, и это никто не заказывал.
+      this.scene.background = base;
+      fog.color = base.clone();
+      fog.near = p.fogNear;
+      fog.far = this.camera.far;
+      this.renderer.toneMappingExposure = p.exposure;
+      return;
+    }
+
+    const smokeColor = new THREE.Color(0x8b8f94);
     this.scene.background = base.clone().lerp(smokeColor, Math.min(1, smoke * 1.4));
     fog.color = (this.scene.background as THREE.Color).clone();
-    const far = smoke < 0.02 ? this.camera.far : Math.min(this.camera.far, 7 / smoke);
+    const far = Math.min(this.camera.far, 7 / smoke);
     fog.far = far;
     fog.near = Math.min(p.fogNear, far * 0.12);
     this.renderer.toneMappingExposure = p.exposure * lerp(1, 0.8, smoke);
@@ -516,6 +535,18 @@ export class VoxelRenderer {
 
   get currentQuality(): Quality {
     return this.quality;
+  }
+
+  /** Воксельные правки шейдера: свет от неба, блики, зерно. */
+  setVoxelShading(on: boolean): void {
+    if (this.voxelShading === on) return;
+    this.voxelShading = on;
+    this.opaqueMaterial.needsUpdate = true;
+    this.glassMaterial.needsUpdate = true;
+  }
+
+  get voxelShadingEnabled(): boolean {
+    return this.voxelShading;
   }
 
   /**
