@@ -271,6 +271,45 @@ async function main() {
   const milestoneMap = await ensureMilestones();
   console.log('\nIssues:');
   await syncIssues(milestoneMap);
+  if (closeDone) {
+    console.log('\nВехи, у которых всё сделано:');
+    await closeFinishedMilestones(milestoneMap);
+  }
+}
+
+/**
+ * Закрыть вехи, у которых не осталось незакрытых задач.
+ *
+ * GitHub сам этого не делает: веха на ста процентах остаётся открытой
+ * навсегда, и список вех перестаёт отвечать на единственный вопрос, ради
+ * которого в него смотрят, — что ещё не сделано.
+ *
+ * Закрываем только те, где в плане все задачи done: считать по проценту
+ * на сайте нельзя, там может висеть issue, заведённая руками мимо плана.
+ */
+async function closeFinishedMilestones(milestoneMap) {
+  for (const m of milestones) {
+    const mine = issues.filter((i) => i.milestone === m.title);
+    if (mine.length === 0 || mine.some((i) => i.status !== 'done')) continue;
+    const number = milestoneMap.get(m.title);
+    if (!number) continue;
+    const current = await api(`/repos/${repo}/milestones/${number}`);
+    if (current.state === 'closed') {
+      console.log(`  уже закрыта:   ${m.title}`);
+      continue;
+    }
+    if (current.open_issues > 0) {
+      // На вехе висит что-то, чего нет в плане, — закрывать нельзя:
+      // веха с открытой задачей внутри врёт сильнее, чем открытая веха.
+      console.log(`  не закрываю:   ${m.title} — открытых issues ${current.open_issues}`);
+      continue;
+    }
+    await api(`/repos/${repo}/milestones/${number}`, {
+      method: 'PATCH',
+      body: { state: 'closed' },
+    });
+    console.log(`  закрыта:       ${m.title}`);
+  }
 }
 
 main().catch((err) => {

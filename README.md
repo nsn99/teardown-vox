@@ -130,6 +130,7 @@ docs/states      эталонные ролики, с которыми сверя
 npm run issues:plan                                    # посмотреть план
 GH_TOKEN=… npm run issues:sync -- --repo owner/name    # залить в GitHub
 GH_TOKEN=… npm run issues:sync -- --repo owner/name --close-done
+# --close-done закрывает сделанные issues и вехи, где не осталось открытых
 ```
 
 Скрипт идемпотентен: повторный запуск обновляет существующие issues,
