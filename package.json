@@ -22,7 +22,8 @@
     "lint": "eslint .",
     "issues:plan": "node tools/issues/sync-issues.mjs --dry-run",
     "issues:sync": "node tools/issues/sync-issues.mjs",
-    "smoke": "npm run build --workspace apps/web && node tools/smoke/run.mjs"
+    "smoke": "npm run build --workspace apps/web && node tools/smoke/run.mjs",
+    "states": "node tools/states/record.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

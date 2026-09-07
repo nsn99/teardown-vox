@@ -6,11 +6,27 @@ import {
   chaseCamera,
   NEUTRAL_INPUT,
   Profile,
+  MAX_TIER,
+  TOOL_IDS,
+  ToolId,
   VehicleInput,
   portLevel,
   toolBySlot,
 } from '@tvox/game';
-import { RapierPhysics, add, carve, clamp, explode, scale, stepStructure, v3 } from '@tvox/core';
+import {
+  Body,
+  Mat,
+  RapierPhysics,
+  VoxelShape,
+  add,
+  carve,
+  clamp,
+  explode,
+  materialByName,
+  scale,
+  stepStructure,
+  v3,
+} from '@tvox/core';
 import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
@@ -424,6 +440,14 @@ declare global {
       look(x: number, y: number, z: number, yaw: number, pitch: number): void;
       /** Кусок ядра для замеров из прогона: разрушение и структура. */
       core: { carve: typeof carve; stepStructure: typeof stepStructure };
+      /** Поставить блок материала — стенд для съёмки состояний. */
+      stand(material: string, x: number, y: number, z: number, size?: number): number;
+      /** Ударить активным инструментом. Возвращает, сколько снял. */
+      swing(tool: string): number;
+      /** Поднять все инструменты до максимума — для съёмки состояний. */
+      upgradeAll(): void;
+      /** Сколько вокселей осталось в теле стенда. */
+      standLeft(id: number): number;
     };
   }
 }
@@ -452,6 +476,55 @@ window.tvox = {
     heist.pitch = pitch;
   },
   core: { carve, stepStructure },
+  stand(material, x, y, z, size = 12) {
+    if (!heist) return -1;
+    const mat = materialByName(material);
+    if (!mat) return -1;
+    // Стенд — не куб, а стенка: в игре ломают стены, и «пробил насквозь»
+    // читается на ролике куда лучше, чем «отгрыз угол у кубика».
+    const shape = new VoxelShape({ sx: size, sy: size, sz: 4, voxelSize: 0.1, name: material });
+    shape.fill({}, mat.id);
+    // Плита в основании — из несущего материала. Без неё блок висит сам по
+    // себе, структурная целостность честно роняет его в первом же кадре, и
+    // снимать оказывается нечего.
+    shape.fill({ y1: 2 }, Mat.Foundation);
+    shape.transform = { position: v3(x, y, z), rotation: { x: 0, y: 0, z: 0, w: 1 } };
+    const body = new Body({ kind: 'static', shapes: [shape], name: `стенд:${material}` });
+    heist.sim.world.addBody(body);
+    renderer.prime();
+    return body.id;
+  },
+  swing(tool) {
+    if (!heist) return 0;
+    const h = heist;
+    // select возвращает false, если инструмент уже выбран, — на выбор это
+    // не влияет, и проверять её результат тут нечего.
+    h.inventory.select(tool as ToolId);
+    if (h.inventory.active !== tool) return 0;
+    // Откат снимаем руками: съёмка идёт по шагам, а не по секундам, и
+    // игровые полсекунды между ударами здесь не проходят вовсе.
+    h.inventory.tick(10);
+    const res = h.use();
+    // Заряд сам по себе ничего не показывает — интересен взрыв. Считаем
+    // при этом воксели, а не заряды: detonateAll возвращает второе.
+    if (tool === 'explosive' && res.used) {
+      const before = h.sim.world.totalSolidVoxels();
+      h.detonate();
+      return before - h.sim.world.totalSolidVoxels();
+    }
+    return res.removed ?? 0;
+  },
+  upgradeAll() {
+    if (!heist) return;
+    for (const id of TOOL_IDS) heist.inventory.setTier(id, MAX_TIER);
+  },
+  standLeft(id) {
+    const body = heist?.sim.world.bodies.get(id);
+    if (!body) return 0;
+    let n = 0;
+    for (const s of body.shapes) n += s.solidVoxels;
+    return n;
+  },
 };
 
 /**
