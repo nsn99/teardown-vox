@@ -22,15 +22,22 @@ export interface RendererOptions {
   quality?: Quality;
   /** Ребро чанка в вокселях. Меньше — точнее ремеш, больше — меньше вызовов отрисовки. */
   chunkSize?: number;
-  /** Сколько чанков перестраиваем за кадр. */
+  /** Сколько чанков перестраиваем за кадр при минимальном бюджете времени. */
   remeshBudget?: number;
   /**
-   * Потолок времени на ремеш в кадре, мс. Чанк чанку рознь: пустой
+   * Пол бюджета времени на ремеш в кадре, мс. Чанк чанку рознь: пустой
    * строится мгновенно, а угол склада — это шесть проходов по 32³
    * клеткам. Считать бюджет в штуках — значит иногда потратить кадр
    * целиком, поэтому решает время.
    */
   remeshMs?: number;
+  /**
+   * Какую долю кадра отдаём ремешу сверх пола. Четверть — это ровно 4 мс
+   * при 60 к/с, то есть на быстрой машине правило ничего не меняет.
+   */
+  remeshShare?: number;
+  /** Потолок бюджета, мс: разовая заминка не должна становиться ступором. */
+  remeshMaxMs?: number;
   /** Дальность прорисовки, м. */
   viewDistance?: number;
 }
@@ -163,6 +170,11 @@ export class VoxelRenderer {
   private chunkSize: number;
   private remeshBudget: number;
   private remeshMs: number;
+  private remeshShare: number;
+  private remeshMaxMs: number;
+  /** Сглаженная длительность кадра, мс. Из неё считается бюджет ремеша. */
+  private frameMs = 1000 / 60;
+  private lastFrame = 0;
   private aoStrength: number;
   private seenShapes = new Set<number>();
   /**
@@ -191,6 +203,8 @@ export class VoxelRenderer {
     this.chunkSize = opts.chunkSize ?? 32;
     this.remeshBudget = opts.remeshBudget ?? 6;
     this.remeshMs = opts.remeshMs ?? 4;
+    this.remeshShare = opts.remeshShare ?? 0.25;
+    this.remeshMaxMs = opts.remeshMaxMs ?? 120;
     this.aoStrength = quality.ao;
     this.shadowSize = quality.shadowMap;
     this.quality = opts.quality ?? 'medium';
@@ -768,7 +782,22 @@ export class VoxelRenderer {
     }
   }
 
+  /**
+   * Замер длительности кадра — основа бюджета ремеша.
+   * Огромный промежуток означает свёрнутую вкладку или точку останова в
+   * отладчике, а не медленную машину, и в оценку не идёт.
+   */
+  private tickFrame(): void {
+    const now = performance.now();
+    if (this.lastFrame > 0) {
+      const dt = now - this.lastFrame;
+      if (dt > 0 && dt < 2000) this.frameMs += (dt - this.frameMs) * 0.2;
+    }
+    this.lastFrame = now;
+  }
+
   private remesh(): void {
+    this.tickFrame();
     const dirty: ChunkEntry[] = [];
     for (const c of this.chunks.values()) if (c.dirty) dirty.push(c);
     this.stats.chunks = this.chunks.size;
@@ -791,8 +820,27 @@ export class VoxelRenderer {
     // Первая сборка идёт без бюджета: карта обязана появиться целиком, а
     // не проявляться чанк за чанком минуту после старта. Бюджет — про
     // разрушение в кадре, а не про загрузку уровня.
-    const budget = this.priming ? dirty.length : Math.min(this.remeshBudget, dirty.length);
-    const until = this.priming ? Infinity : performance.now() + this.remeshMs;
+    //
+    // Дальше бюджет считается долей кадра, а не абсолютными
+    // миллисекундами, и вот почему. Угол склада строится ~15 мс, то есть
+    // при жёстких 4 мс цикл успевает ровно один чанк за кадр. На машине
+    // с кадром в 16 мс это шестьдесят чанков в секунду — дыра в стене
+    // зарастает мгновенно. На слабой, где кадр 600 мс, — полтора чанка в
+    // секунду, и игрок полминуты смотрит на недостроенную геометрию.
+    // Получается ровно наоборот тому, что нужно: чем медленнее машина,
+    // тем дольше она врёт про то, что происходит в мире.
+    //
+    // Четверть кадра при 60 к/с — это те же 4 мс, так что на быстром
+    // железе правило не меняет ничего. На медленном ремеш занимает свою
+    // четверть и сходится за пару кадров. Разгона не будет: кадр с
+    // ремешем растёт не более чем в 1/(1−доля) раз, то есть на треть.
+    const budgetMs = this.priming
+      ? Infinity
+      : Math.min(this.remeshMaxMs, Math.max(this.remeshMs, this.frameMs * this.remeshShare));
+    const budget = this.priming
+      ? dirty.length
+      : Math.min(dirty.length, Math.max(this.remeshBudget, Math.ceil(budgetMs / 2)));
+    const until = performance.now() + budgetMs;
     let done = 0;
     for (let i = 0; i < budget; i++) {
       this.rebuild(dirty[i]);

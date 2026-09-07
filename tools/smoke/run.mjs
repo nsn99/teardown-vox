@@ -295,7 +295,7 @@ try {
     // проёме, а не освещённость зала.
     const atFloor = () => window.tvox.look(16, 1.7, 22, 0, -0.55);
     await page.evaluate(atFloor);
-    await settleMesh(page);
+    await settleMesh(page, 'склада');
     const before = await meanLuminance(await page.screenshot({ type: 'png' }));
     await page.screenshot({ path: join(outDir, '04-inside.png') });
 
@@ -305,7 +305,7 @@ try {
     });
     if (removed <= 0) throw new Error('Крыша не пробилась, светить нечему');
     await page.evaluate(atFloor);
-    await settleMesh(page);
+    await settleMesh(page, 'пробитой крыши');
     const after = await meanLuminance(await page.screenshot({ type: 'png' }));
     await page.screenshot({ path: join(outDir, '05-inside-lit.png') });
 
@@ -330,7 +330,7 @@ try {
     // Наружу, на открытое место: в тёмном зале туман мерить бессмысленно,
     // там и без дыма ничего не видно дальше десяти метров.
     await page.evaluate(() => window.tvox.look(24, 1.7, 13, 0, -0.05));
-    await settleMesh(page);
+    await settleMesh(page, 'открытого места');
     const clear = await meanLuminance(await page.screenshot({ type: 'png' }));
 
     const cells = await page.evaluate(() => {
@@ -444,14 +444,59 @@ try {
   setTimeout(() => process.exit(process.exitCode ?? 0), 1500).unref();
 }
 
-/** Дождаться, пока в сцене не останется недостроенных чанков. */
-async function settleMesh(page) {
-  await page.waitForFunction(
-    () => (window.tvox?.renderer?.stats?.dirty ?? 1) === 0,
-    undefined,
-    { timeout: 60000, polling: 200 },
-  );
-  await page.waitForTimeout(500);
+/**
+ * Дождаться, пока в сцене не останется недостроенных чанков.
+ *
+ * Ждём по существу, а не по секундомеру. Пока счётчик убывает — работа
+ * идёт, и обрывать её по таймеру глупо: раннер медленнее ноутбука втрое,
+ * и любое «ну, шестьдесят секунд хватит» рано или поздно оказывается
+ * ставкой на чужое железо. А если счётчик встал — ждать дальше тем более
+ * бессмысленно.
+ *
+ * И главное: отсюда не летят исключения. Замер на почти достроенной
+ * сцене всё равно осмысленнее, чем «Timeout 60000ms exceeded» вместо
+ * диагноза; сколько чанков осталось, скажет журнал, а провалит шаг та
+ * проверка, ради которой он написан.
+ */
+async function settleMesh(page, what = 'сцены') {
+  const STALL_MS = 20_000;
+  const CAP_MS = 240_000;
+  const started = Date.now();
+  let first = -1;
+  let best = Infinity;
+  let moved = started;
+
+  for (;;) {
+    const dirty = await page.evaluate(() => window.tvox?.renderer?.stats?.dirty ?? -1);
+    if (first < 0) first = dirty;
+    if (dirty === 0) {
+      // Время схождения пишем всегда, а не только при провале: бюджет
+      // ремеша — это доля кадра, и если он однажды снова станет
+      // фиксированным, здесь это будет видно числом, а не таймаутом.
+      if (first > 0) {
+        steps.push(
+          `ремеш ${what}: ${first} чанков за ${((Date.now() - started) / 1000).toFixed(1)} с`,
+        );
+      }
+      // Кадр после последнего чанка: свет и тени должны успеть лечь.
+      await page.waitForTimeout(500);
+      return;
+    }
+    if (dirty >= 0 && dirty < best) {
+      best = dirty;
+      moved = Date.now();
+    }
+    const now = Date.now();
+    if (now - moved > STALL_MS || now - started > CAP_MS) {
+      const why = now - moved > STALL_MS ? 'счётчик стоит' : 'вышло время';
+      steps.push(
+        `ремеш ${what} не сошёлся (${why}): осталось ${dirty} чанков ` +
+          `за ${((now - started) / 1000).toFixed(1)} с`,
+      );
+      return;
+    }
+    await page.waitForTimeout(300);
+  }
 }
 
 /** Доля достаточно светлых пикселей в PNG. */
