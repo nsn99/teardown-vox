@@ -298,10 +298,19 @@ async function closeFinishedMilestones(milestoneMap) {
       console.log(`  уже закрыта:   ${m.title}`);
       continue;
     }
-    if (current.open_issues > 0) {
+    // Спрашиваем сами issues, а не счётчик вехи: счётчик обновляется не
+    // сразу, и сразу после закрытия задач он показывает вчерашнее число.
+    // Один прогон закрывал бы задачи, а вехи — только следующий, и это
+    // выглядело бы как «команда не работает».
+    const open = (await paged(`/repos/${repo}/issues?milestone=${number}&state=open`)).filter(
+      (i) => !i.pull_request,
+    );
+    if (open.length > 0) {
       // На вехе висит что-то, чего нет в плане, — закрывать нельзя:
       // веха с открытой задачей внутри врёт сильнее, чем открытая веха.
-      console.log(`  не закрываю:   ${m.title} — открытых issues ${current.open_issues}`);
+      console.log(
+        `  не закрываю:   ${m.title} — открыто ${open.map((i) => `#${i.number}`).join(', ')}`,
+      );
       continue;
     }
     await api(`/repos/${repo}/milestones/${number}`, {
