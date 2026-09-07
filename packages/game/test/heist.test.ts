@@ -184,16 +184,26 @@ describe('прохождение ограбления', () => {
     h.events.on('target:picked', (e) => events.push(`pick:${e.id}`));
     h.events.on('heist:finished', (r) => events.push(`end:${r.success}`));
 
-    // Ставим игрока рядом с сейфом и наводим прицел точно на него.
-    const safe = PORT_TARGETS[0];
-    h.character.teleport(v3(safe.position.x, 0.35, safe.position.z + 1.5));
-    aimAt(h, v3(safe.position.x, safe.position.y + 0.4, safe.position.z));
-    expect(h.interact()).toBe('safe');
-    expect(h.mission.phase).toBe('alarm');
+    // Ставим игрока рядом с папкой и наводим прицел точно на неё.
+    // Сейф для этого не годится: сто восемьдесят килограммов руками не
+    // берут — на то есть отдельная проверка и отдельная техника.
+    const painting = PORT_TARGETS.find((t) => t.id === 'painting')!;
+    h.character.teleport(v3(painting.position.x, 0.35, painting.position.z + 1.5));
+    aimAt(h, v3(painting.position.x, painting.position.y + 0.4, painting.position.z));
+    expect(h.interact()).toBe('painting');
+    // Картина без провода: взяли тихо, таймер не пошёл.
+    expect(h.mission.phase).toBe('recon');
 
-    // Вторую цель отдаём напрямую — важна механика доставки, не путь.
-    h.mission.drop('safe', PORT_EXTRACTION.center);
-    h.mission.pickUp('docs');
+    // Проводная цель включает таймер. Остальное отдаём напрямую — важна
+    // механика доставки, а не путь по карте.
+    h.mission.drop('painting', PORT_EXTRACTION.center);
+    expect(h.mission.pickUp('docs')).toBe(true);
+    expect(h.mission.phase).toBe('alarm');
+    h.mission.drop('docs', PORT_EXTRACTION.center);
+    // Сейф едет в кузове: сам он в зону эвакуации не дойдёт.
+    const van = h.vehicles.get('van')!;
+    van.position = { ...PORT_EXTRACTION.center };
+    h.mission.stow('safe', 'van', van.position);
     h.character.teleport(PORT_EXTRACTION.center);
     h.update(0.1, DEFAULT_INPUT);
 

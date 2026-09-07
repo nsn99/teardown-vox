@@ -39,6 +39,15 @@ export interface MissionConfig {
   extraction: ExtractionZone;
   /** Сколько целей игрок несёт одновременно. */
   maxCarried?: number;
+  /**
+   * Что игрок в состоянии поднять руками, кг.
+   *
+   * Без этого числа сейф на сто восемьдесят килограммов носят как папку с
+   * документами, и вся техника на карте становится украшением. Тяжёлое не
+   * поднимают — его закатывают в кузов, а кузов увозит машина: у карты
+   * появляется задача, которую иначе не решить.
+   */
+  liftMass?: number;
   /** Нужно ли самому оказаться в зоне эвакуации для успеха. */
   requirePlayerInZone?: boolean;
 }
@@ -108,6 +117,7 @@ export class Mission {
     this.config = {
       maxCarried: 1,
       requirePlayerInZone: true,
+      liftMass: 60,
       ...config,
       alarmSeconds: config.alarmSeconds ?? DEFAULT_ALARM,
     };
@@ -198,14 +208,25 @@ export class Mission {
     this.events.emit('phase:changed', { from, to });
   }
 
+  /** Поднимается ли цель руками. Тяжёлое возят, а не носят. */
+  canLift(id: string): boolean {
+    const t = this.targets.get(id);
+    if (!t) return false;
+    return (t.spec.mass ?? 0) <= this.config.liftMass;
+  }
+
   /** Взять цель в руки. Проводная цель поднимает тревогу. */
   pickUp(id: string): boolean {
     if (this.finished) return false;
-    if (this._phase === 'briefing') this.begin();
     const t = this.targets.get(id);
     if (!t) return false;
     if (t.state !== 'idle') return false;
     if (this.carried.length >= this.config.maxCarried) return false;
+    // Вес проверяем до начала миссии: попытка поднять неподъёмное ничего
+    // в мире не меняет — ни таймера, ни тревоги. Провод рвут кувалдой или
+    // руками, а не безуспешным подёргиванием сейфа.
+    if (!this.canLift(id)) return false;
+    if (this._phase === 'briefing') this.begin();
 
     t.state = 'carried';
     this.carried.push(id);

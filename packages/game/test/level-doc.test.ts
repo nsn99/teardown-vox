@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Mat, Simulation } from '@tvox/core';
+import { Mat, Simulation, v3 } from '@tvox/core';
 import {
   LevelDoc,
   LevelFormatError,
@@ -174,6 +174,19 @@ describe('формат карты', () => {
     expect(ground?.structural).toBe(false);
   });
 
+  it('маршруты отхода доезжают до уровня и обратно в документ', () => {
+    const level = levelFromDoc(PORT_DOC);
+    expect(level.routes?.length).toBeGreaterThanOrEqual(3);
+    const yard = level.routes?.find((r) => r.id === 'yard');
+    expect(yard?.needs).toBe('foot');
+    // В документе точки — массивы, в уровне — векторы: проверяем, что
+    // перевод не потерял ни точки, ни порядка.
+    expect(yard?.waypoints[0]).toEqual(v3(26.5, 0.9, 26.5));
+    const back = docFromLevel(level, seed(level));
+    expect(back.routes?.length).toBe(level.routes?.length);
+    expect(back.routes?.[0].waypoints[0]).toEqual([26.5, 0.9, 26.5]);
+  });
+
   it('погоня из документа доезжает до уровня', () => {
     const level = levelFromDoc(PORT_DOC);
     expect(level.pursuit?.length).toBe(2);
@@ -277,6 +290,20 @@ describe('формат карты: ошибки называют поле', () =
         ];
       }),
       path: 'triggers[0].kind',
+    },
+    {
+      name: 'маршрут из одной точки',
+      input: broken((d) => {
+        d.routes = [{ id: 'x', name: 'x', needs: 'foot', waypoints: [[0, 0, 0]] }];
+      }),
+      path: 'routes[0].waypoints',
+    },
+    {
+      name: 'маршрут требует неизвестно чего',
+      input: broken((d) => {
+        d.routes = [{ id: 'x', name: 'x', needs: 'телепорт', waypoints: [[0, 0, 0], [1, 0, 0]] }];
+      }),
+      path: 'routes[0].needs',
     },
     {
       name: 'преследователь неизвестной породы',

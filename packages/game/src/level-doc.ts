@@ -14,8 +14,10 @@ import {
 import {
   Daylight,
   EnvironmentDef,
+  EscapeRoute,
   LevelSource,
   LightDef,
+  RouteNeeds,
   SpawnPoint,
   TriggerDef,
   TriggerKind,
@@ -129,6 +131,8 @@ export type MissionDoc = Omit<MissionConfig, 'targets' | 'extraction'> & {
   extraction: { center: Vec3Doc; halfExtents: Vec3Doc };
 };
 
+export type RouteDoc = Omit<EscapeRoute, 'waypoints'> & { waypoints: Vec3Doc[] };
+
 export interface LevelDoc {
   format: typeof LEVEL_FORMAT;
   version: number;
@@ -147,6 +151,8 @@ export interface LevelDoc {
   pursuit?: ChaserDoc[];
   /** Время суток и свет уровня. */
   environment?: EnvironmentDoc;
+  /** Заявленные пути отхода. */
+  routes?: RouteDoc[];
 }
 
 const point = (p: Vec3Doc): Vec3 => v3(p[0], p[1], p[2]);
@@ -173,6 +179,10 @@ export const missionOf = (doc: LevelDoc): MissionConfig => ({
 /** Преследователи документа в игровых. */
 export const pursuitOf = (doc: LevelDoc): ChaserSpec[] | undefined =>
   doc.pursuit?.map((c) => ({ ...c, from: point(c.from) }));
+
+/** Маршруты документа в игровые. */
+export const routesOf = (doc: LevelDoc): EscapeRoute[] | undefined =>
+  doc.routes?.map((r) => ({ ...r, waypoints: r.waypoints.map(point) }));
 
 /** Освещение документа в игровое. */
 export const environmentOf = (doc: LevelDoc): EnvironmentDef | undefined =>
@@ -564,6 +574,39 @@ export function parseLevelDoc(input: unknown): LevelDoc {
     ...(o.environment === undefined
       ? {}
       : { environment: parseEnvironment(o.environment, 'environment') }),
+    ...(Array.isArray(o.routes)
+      ? { routes: (o.routes as unknown[]).map((r, i) => parseRoute(r, `routes[${i}]`)) }
+      : {}),
+  };
+}
+
+const ROUTE_NEEDS: readonly RouteNeeds[] = ['foot', 'planks', 'vehicle', 'boat'];
+
+function parseRoute(v: unknown, path: string): RouteDoc {
+  if (!isObj(v)) fail(path, `ожидался объект маршрута, пришло ${show(v)}`);
+  const o = v as Record<string, unknown>;
+  const needs = str(o.needs, `${path}.needs`);
+  if (!ROUTE_NEEDS.includes(needs as RouteNeeds)) {
+    fail(`${path}.needs`, `ожидалось одно из ${ROUTE_NEEDS.join(', ')}, пришло «${needs}»`);
+  }
+  if (!Array.isArray(o.waypoints) || o.waypoints.length < 2) {
+    fail(`${path}.waypoints`, `маршрут — это хотя бы две точки, пришло ${show(o.waypoints)}`);
+  }
+  return {
+    id: str(o.id, `${path}.id`),
+    name: str(o.name, `${path}.name`),
+    needs: needs as RouteNeeds,
+    waypoints: (o.waypoints as unknown[]).map((w, i) => vec3(w, `${path}.waypoints[${i}]`)),
+    ...(o.collects === undefined
+      ? {}
+      : {
+          collects: (() => {
+            if (!Array.isArray(o.collects)) {
+              fail(`${path}.collects`, `ожидался список имён ценностей, пришло ${show(o.collects)}`);
+            }
+            return (o.collects as unknown[]).map((c, i) => str(c, `${path}.collects[${i}]`));
+          })(),
+        }),
   };
 }
 
@@ -774,6 +817,7 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
     mission,
     ...(doc.pursuit ? { pursuit: pursuitOf(doc)! } : {}),
     ...(doc.environment ? { environment: environmentOf(doc)! } : {}),
+    ...(doc.routes ? { routes: routesOf(doc)! } : {}),
     doc,
 
     build(sim: Simulation): Body[] {
@@ -874,6 +918,9 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
       },
     },
     ...(level.pursuit ? { pursuit: level.pursuit.map((c) => ({ ...c, from: flat(c.from) })) } : {}),
+    ...(level.routes
+      ? { routes: level.routes.map((r) => ({ ...r, waypoints: r.waypoints.map(flat) })) }
+      : {}),
     ...(level.environment
       ? {
           environment: {

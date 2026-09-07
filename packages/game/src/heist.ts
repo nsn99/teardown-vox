@@ -254,7 +254,10 @@ export class Heist {
    * Возвращает id техники или null.
    */
   stow(): string | null {
-    const carried = this.mission.carriedIds[0];
+    // Тяжёлое в руки не берут, поэтому грузить надо уметь и с земли:
+    // подошёл с машиной к сейфу — закатил. Иначе неподъёмная цель была бы
+    // просто недоступной, а не «требующей техники».
+    const carried = this.mission.carriedIds[0] ?? this.heavyWithinReach();
     if (!carried) return null;
     const from = this.playerPosition;
     for (const [id, veh] of this.vehicles) {
@@ -271,6 +274,26 @@ export class Heist {
       this.placeTargetBody(carried, at, true);
       this.events.emit('target:stowed', { id: carried, vehicle: id });
       return id;
+    }
+    return null;
+  }
+
+  /**
+   * Неподъёмная цель на земле в пределах вытянутой руки.
+   * Ищем не по прицелу, а по расстоянию: закатывая сейф в кузов, игрок
+   * смотрит на машину, а не на сейф.
+   */
+  private heavyWithinReach(): string | null {
+    const from = this.playerPosition;
+    for (const t of this.mission.targets.values()) {
+      if (t.state !== 'idle') continue;
+      if (this.mission.canLift(t.spec.id)) continue;
+      const d = Math.hypot(
+        t.spec.position.x - from.x,
+        t.spec.position.y - from.y,
+        t.spec.position.z - from.z,
+      );
+      if (d <= REACH) return t.spec.id;
     }
     return null;
   }
