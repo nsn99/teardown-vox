@@ -10,6 +10,9 @@ import {
   regionIsEmpty,
 } from '@tvox/core';
 import { MeshData, meshShape } from './mesher.js';
+import { ChunkSlice, sliceChunk } from './chunk-view.js';
+import { MesherPool, RemeshResult } from './mesher-pool.js';
+import { RemeshQueue } from './remesh-queue.js';
 
 /** Ключ чанка по координатам сетки. Сдвиг — чтобы -1 не схлопывался с 1. */
 const key3 = (x: number, y: number, z: number): number =>
@@ -52,6 +55,12 @@ interface ChunkEntry {
   opaque: THREE.Mesh;
   glass: THREE.Mesh;
   dirty: boolean;
+  /**
+   * Чанк уже отдан очереди и с тех пор не менялся.
+   * Без этого признака каждый кадр заново подавал бы заявку на то же
+   * самое, обесценивая едва начатую работу, — и не достроился бы никогда.
+   */
+  queued: boolean;
   /** Мировая позиция центра чанка — для сортировки по расстоянию. */
   center: THREE.Vector3;
 }
@@ -172,6 +181,15 @@ export class VoxelRenderer {
   private remeshMs: number;
   private remeshShare: number;
   private remeshMaxMs: number;
+  /**
+   * Меширование в стороне от кадра. Пул поднимается, если браузер умеет
+   * модульные воркеры; если нет — очереди нет вовсе, и сцена мешит в
+   * кадре по бюджету, как и раньше.
+   */
+  private pool?: MesherPool;
+  private queue?: RemeshQueue<ChunkSlice>;
+  /** Сколько чанков пришло из воркеров за кадр — для метрики ремеша. */
+  private landed = 0;
   /** Сглаженная длительность кадра, мс. Из неё считается бюджет ремеша. */
   private frameMs = 1000 / 60;
   private lastFrame = 0;
@@ -195,8 +213,16 @@ export class VoxelRenderer {
   private voxelUniform = { value: 0.1 };
   private daylight: Daylight = 'dusk';
 
-  /** Метрики последнего кадра — для перф-регрессии. */
-  stats = { chunks: 0, remeshed: 0, dirty: 0, quads: 0, triangles: 0 };
+  /**
+   * Метрики последнего кадра — для перф-регрессии.
+   *
+   * `syncMs` — сколько главный поток отдал сцене: разбор мира, нарезка
+   * чанков, приём готовых мешей. Это и есть та величина, которую обещает
+   * очередь ремеша: работа ушла в воркеры, а в кадре осталась передача
+   * буферов. Мерить кадр целиком бессмысленно — в него входит и
+   * физика, и отрисовка, и произвол планировщика браузера.
+   */
+  stats = { chunks: 0, remeshed: 0, dirty: 0, quads: 0, triangles: 0, workers: 0, syncMs: 0 };
 
   constructor(opts: RendererOptions) {
     const quality = QUALITY[opts.quality ?? 'medium'];
@@ -273,6 +299,22 @@ export class VoxelRenderer {
       }),
     );
     this.setDaylight('dusk');
+
+    // Меширование уезжает в воркеры, если браузер это умеет. Очередь
+    // существует ровно тогда, когда есть кому раздавать: без пула сцена
+    // работает по старому пути, в кадре и по бюджету.
+    this.pool = MesherPool.create(
+      (r) => this.applyResult(r),
+      () => this.dropPool(),
+    );
+    if (this.pool) {
+      const pool = this.pool;
+      this.queue = new RemeshQueue<ChunkSlice>({
+        slots: pool.depth,
+        send: (key, token, slice) => pool.mesh(key, token, slice, this.aoStrength),
+      });
+      this.stats.workers = pool.slots;
+    }
   }
 
   /**
@@ -543,7 +585,7 @@ export class VoxelRenderer {
     }
     // Затенение в углах запечено в вершинах, поэтому смена качества
     // требует пересборки мешей — но не пересборки сцены.
-    for (const c of this.chunks.values()) c.dirty = true;
+    for (const c of this.chunks.values()) markChunkDirty(c);
     this.renderer.shadowMap.needsUpdate = true;
   }
 
@@ -570,10 +612,15 @@ export class VoxelRenderer {
    */
   prime(): void {
     this.priming = true;
+    // Загрузка уровня строит всё в кадре, а не по кусочкам из воркеров:
+    // недостроенные ответы от прошлой карты только мешают.
+    this.queue?.clear();
+    for (const c of this.chunks.values()) c.queued = false;
   }
 
   /** Подтягивает сцену под текущее состояние мира. */
   sync(world: VoxelWorld): void {
+    const started = performance.now();
     this.seenShapes.clear();
 
     for (const body of world.bodies.values()) {
@@ -603,6 +650,7 @@ export class VoxelRenderer {
     this.dropGoneShapes();
     this.dropGoneBodies(world);
     this.remesh();
+    this.stats.syncMs = performance.now() - started;
   }
 
   private ensureChunks(body: Body, shape: VoxelShape, group: THREE.Group): void {
@@ -644,6 +692,7 @@ export class VoxelRenderer {
             opaque,
             glass,
             dirty: true,
+            queued: false,
             center: new THREE.Vector3(),
           };
           this.chunks.set(entry.key, entry);
@@ -732,8 +781,8 @@ export class VoxelRenderer {
       }
       const cs = this.chunkSize;
       for (const c of list) {
-        if (wanted.has(key3(c.cx, c.cy, c.cz))) c.dirty = true;
-        else if (litRegion && touches(litRegion, c, cs)) c.dirty = true;
+        if (wanted.has(key3(c.cx, c.cy, c.cz))) markChunkDirty(c);
+        else if (litRegion && touches(litRegion, c, cs)) markChunkDirty(c);
       }
       shape.clearMeshDirty();
       return;
@@ -751,7 +800,7 @@ export class VoxelRenderer {
     const z1 = Math.floor(region.z1 / cs);
     for (const c of list) {
       if (c.cx >= x0 && c.cx <= x1 && c.cy >= y0 && c.cy <= y1 && c.cz >= z0 && c.cz <= z1) {
-        c.dirty = true;
+        markChunkDirty(c);
       }
     }
     shape.clearMeshDirty();
@@ -765,6 +814,7 @@ export class VoxelRenderer {
         c.glass.geometry.dispose();
         c.opaque.parent?.remove(c.opaque);
         c.glass.parent?.remove(c.glass);
+        this.queue?.cancel(c.key);
         this.chunks.delete(c.key);
       }
       this.shapeHolders.get(shapeId)?.removeFromParent();
@@ -801,8 +851,10 @@ export class VoxelRenderer {
     const dirty: ChunkEntry[] = [];
     for (const c of this.chunks.values()) if (c.dirty) dirty.push(c);
     this.stats.chunks = this.chunks.size;
-    this.stats.dirty = dirty.length;
-    if (dirty.length === 0) {
+    this.stats.workers = this.pool?.slots ?? 0;
+
+    if (dirty.length === 0 && !this.queue) {
+      this.stats.dirty = 0;
       this.stats.remeshed = 0;
       return;
     }
@@ -812,6 +864,32 @@ export class VoxelRenderer {
     for (const c of dirty) {
       c.opaque.getWorldPosition(c.center);
       (c as { dist?: number }).dist = c.center.distanceToSquared(cam);
+    }
+
+    // Есть воркеры — работа уходит к ним, а в кадре остаётся только
+    // нарезка куска и приём готовых буферов. Приоритет пересчитывается
+    // каждый кадр: игрок едет, и «ближний чанк» через секунду уже другой.
+    if (this.queue && !this.priming) {
+      for (const c of dirty) {
+        const dist = (c as { dist?: number }).dist ?? 0;
+        if (c.queued) {
+          this.queue.setPriority(c.key, dist);
+          continue;
+        }
+        c.queued = true;
+        this.queue.submit(c.key, dist, () => this.sliceOf(c));
+      }
+      this.queue.pump();
+      this.stats.dirty = this.queue.outstanding;
+      this.stats.remeshed = this.landed;
+      this.landed = 0;
+      return;
+    }
+
+    this.stats.dirty = dirty.length;
+    if (dirty.length === 0) {
+      this.stats.remeshed = 0;
+      return;
     }
     dirty.sort(
       (a, b) => ((a as { dist?: number }).dist ?? 0) - ((b as { dist?: number }).dist ?? 0),
@@ -853,9 +931,10 @@ export class VoxelRenderer {
     this.stats.remeshed = done;
   }
 
-  private rebuild(entry: ChunkEntry): void {
+  /** Границы чанка в вокселях его формы. */
+  private regionOf(entry: ChunkEntry): VoxelRegion {
     const cs = this.chunkSize;
-    const region = {
+    return {
       x0: entry.cx * cs,
       y0: entry.cy * cs,
       z0: entry.cz * cs,
@@ -863,6 +942,57 @@ export class VoxelRenderer {
       y1: Math.min(entry.shape.sy, (entry.cy + 1) * cs),
       z1: Math.min(entry.shape.sz, (entry.cz + 1) * cs),
     };
+  }
+
+  /** Нарезка для воркера. Считается в момент отправки, не раньше. */
+  private sliceOf(entry: ChunkEntry): ChunkSlice {
+    return sliceChunk(entry.shape, this.regionOf(entry), this.sky.of(entry.shape));
+  }
+
+  /**
+   * Готовый меш из воркера.
+   *
+   * Устаревший ответ — обычное дело: пока чанк мешился, по стене успели
+   * ударить ещё раз. Такой результат выбрасывается целиком, а не
+   * «подмешивается»: геометрия чанка либо соответствует вокселям, либо
+   * нет, среднего состояния у неё не бывает.
+   */
+  private applyResult(r: RemeshResult): void {
+    if (this.queue?.accept(r.key, r.token)) {
+      const entry = this.chunks.get(r.key);
+      if (entry) {
+        applyMesh(entry.opaque, r.opaque);
+        applyMesh(entry.glass, r.transparent);
+        entry.dirty = false;
+        entry.queued = false;
+        this.landed++;
+      }
+    }
+    // Освободившееся место занимаем сразу, не дожидаясь кадра: при
+    // обрушении кадр под SwiftShader идёт полсекунды, и ждать его —
+    // значит держать воркеры без работы.
+    this.queue?.pump();
+  }
+
+  /**
+   * Воркеры не поднялись или отвалились на ходу.
+   * Всё, что не доехало, возвращается в кадр: лучше подтормозить, чем
+   * оставить в сцене вчерашнюю геометрию.
+   */
+  private dropPool(): void {
+    this.pool = undefined;
+    this.queue = undefined;
+    this.stats.workers = 0;
+    for (const c of this.chunks.values()) {
+      if (c.queued) {
+        c.queued = false;
+        c.dirty = true;
+      }
+    }
+  }
+
+  private rebuild(entry: ChunkEntry): void {
+    const region = this.regionOf(entry);
     const common = {
       region,
       originAtRegion: true,
@@ -872,6 +1002,12 @@ export class VoxelRenderer {
     applyMesh(entry.opaque, meshShape(entry.shape, { ...common, pass: 'opaque' }));
     applyMesh(entry.glass, meshShape(entry.shape, { ...common, pass: 'transparent' }));
     entry.dirty = false;
+    // Построенный в кадре чанк снимает и заявку: ответ воркера по нему
+    // теперь устарел, и принимать его нельзя.
+    if (entry.queued) {
+      entry.queued = false;
+      this.queue?.cancel(entry.key);
+    }
   }
 
   render(): void {
@@ -907,6 +1043,9 @@ export class VoxelRenderer {
   }
 
   dispose(): void {
+    this.pool?.dispose();
+    this.pool = undefined;
+    this.queue = undefined;
     for (const c of this.chunks.values()) {
       c.opaque.geometry.dispose();
       c.glass.geometry.dispose();
@@ -932,6 +1071,16 @@ function touches(r: VoxelRegion, c: { cx: number; cy: number; cz: number }, cs: 
     c.cz * cs < r.z1 &&
     (c.cz + 1) * cs > r.z0
   );
+}
+
+/**
+ * Пометить чанк на перестройку.
+ * Заявка снимается вместе с этим: воксели изменились, и то, что сейчас
+ * мешится, уже не соответствует миру.
+ */
+function markChunkDirty(c: ChunkEntry): void {
+  c.dirty = true;
+  c.queued = false;
 }
 
 function applyMesh(mesh: THREE.Mesh, data: MeshData): void {

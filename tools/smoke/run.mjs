@@ -82,7 +82,7 @@ page.on('response', (r) => {
 
 // Предохранитель: прогон, который завис, должен падать, а не занимать
 // раннер на полчаса.
-const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 600_000);
+const HARD_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 900_000);
 const hardStop = setTimeout(() => {
   console.error(`Дымовой прогон не уложился в ${HARD_TIMEOUT_MS} мс.`);
   process.exit(1);
@@ -219,6 +219,12 @@ try {
     if (gl.calls <= 0) throw new Error('Сцена не рисуется: ни одного вызова отрисовки');
   });
 
+  // Сколько воркеров подняла сцена. Ноль — не поломка (браузер может их
+  // и не дать), но знать об этом надо: дальше идёт проверка, что кадр не
+  // блокируется ремешем, и без воркеров она меряет совсем другое.
+  const workers = await page.evaluate(() => window.tvox.renderer.stats.workers ?? 0);
+  steps.push(`меширование: воркеров ${workers}`);
+
   await step('сцена не чёрная', async () => {
     // WebGL-канвас без preserveDrawingBuffer отдаёт через toBlob пустоту,
     // поэтому яркость меряем по настоящему скриншоту.
@@ -285,6 +291,51 @@ try {
     steps.push(`снято вокселей: ${removed}, всего ${before} → ${after}, тел: ${bodies}`);
   });
   await page.screenshot({ path: join(outDir, '03-after.png') });
+
+  await step('ремеш не блокирует кадр', async () => {
+    // Приёмка очереди ремеша: «просадка при массовом разрушении не больше
+    // N мс». Меряем не кадр целиком — в headless его длительность решает
+    // планировщик браузера, а не наш код, — а время, которое главный поток
+    // отдаёт сцене. Именно оно раньше упиралось в бюджет ремеша: до
+    // четверти кадра на перестройку чанков. С воркерами в кадре остаются
+    // нарезка куска и приём готовых буферов.
+    await settleMesh(page, 'перед замером кадра');
+
+    const removed = await page.evaluate(() => {
+      const h = window.tvox.heist;
+      h.pitch = -0.1;
+      h.yaw = Math.PI * 0.25;
+      return window.tvox.blast(4);
+    });
+    if (removed <= 0) throw new Error('Замер бессмыслен: взрыв ничего не снял');
+
+    const sync = await page.evaluate(
+      (count) =>
+        new Promise((res) => {
+          const out = [];
+          const tick = () => {
+            out.push(window.tvox.renderer.stats.syncMs);
+            if (out.length < count) requestAnimationFrame(tick);
+            else res(out);
+          };
+          requestAnimationFrame(tick);
+        }),
+      20,
+    );
+    const sorted = [...sync].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+    const worst = sorted[sorted.length - 1];
+    steps.push(
+      `главный поток на сцену при обрушении: медиана ${median.toFixed(2)} мс, ` +
+        `худший кадр ${worst.toFixed(2)} мс, воркеров ${workers}`,
+    );
+
+    // Без воркеров сцена мешит в кадре по бюджету — там эта проверка
+    // мерила бы бюджет, а не очередь, и смысла в ней нет.
+    if (workers > 0 && median > 8) {
+      throw new Error(`Ремеш съедает кадр: медиана ${median.toFixed(2)} мс на сцену`);
+    }
+  });
 
   await step('свет попадает внутрь через пробитую крышу', async () => {
     // Смысл небесного света в одной фразе приёмки: пробил крышу — внутри

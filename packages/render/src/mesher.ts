@@ -1,4 +1,4 @@
-import { Mat, MATERIALS, SKY_MAX, VoxelShape } from '@tvox/core';
+import { Mat, MATERIALS, SKY_MAX } from '@tvox/core';
 
 export interface MeshData {
   positions: Float32Array;
@@ -21,6 +21,32 @@ export interface MeshData {
 /** Источник небесного света: мешеру достаточно уметь его спросить. */
 export interface SkyLightSource {
   at(x: number, y: number, z: number): number;
+}
+
+/**
+ * Что мешеру нужно от формы — и ничего сверх того.
+ *
+ * `VoxelShape` подходит сюда как есть, но в воркер целую форму не
+ * отправишь: у склада миллионы вокселей, а перестраивается один чанк.
+ * Поэтому мешер работает с интерфейсом, а не с классом, — и тот же код
+ * мешит и настоящую форму в главном потоке, и вырезанный кусок в
+ * воркере. Две реализации меширования разошлись бы через месяц, и швы
+ * между чанками разъехались бы только на одной из них.
+ */
+export interface MeshSource {
+  readonly sx: number;
+  readonly sy: number;
+  readonly sz: number;
+  readonly voxelSize: number;
+  readonly data: Uint8Array;
+  /** Слой краски: индекс вокселя → номер цвета. */
+  readonly paint: ReadonlyMap<number, number>;
+  idx(x: number, y: number, z: number): number;
+  chunkIndexAt(x: number, y: number, z: number): number;
+  chunkBounds(chunk: number): { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number };
+  solidInChunk(chunk: number): number;
+  solidInLayer(y: number): number;
+  solidInRow(y: number, z: number): number;
 }
 
 export interface MeshOptions {
@@ -68,7 +94,7 @@ const isTransparent = (mat: number): boolean => MATERIALS[mat].alpha < 1;
  * Затенение в углах (AO) входит в ключ склейки: два соседних квада с разным
  * затенением не сливаются, иначе на месте угла получилась бы плоская заливка.
  */
-export function meshShape(shape: VoxelShape, opts: MeshOptions = {}): MeshData {
+export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
   const paint = opts.paintPalette ?? DEFAULT_PAINT;
   const aoStrength = opts.aoStrength ?? 0.35;
   const pass = opts.pass ?? 'opaque';

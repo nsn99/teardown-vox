@@ -53,6 +53,8 @@ export default tseslint.config(
         // Внутри page.evaluate код исполняется в браузере, а не в Node.
         window: 'readonly',
         document: 'readonly',
+        navigator: 'readonly',
+        requestAnimationFrame: 'readonly',
       },
     },
     rules: {
