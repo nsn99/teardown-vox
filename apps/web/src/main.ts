@@ -314,7 +314,9 @@ function handleActions(h: Heist): void {
     return;
   }
 
-  if (input.state.firing) {
+  const primaryPressed = input.take('Mouse0');
+  const use = h.inventory.active === 'planks' ? primaryPressed : input.state.firing || primaryPressed;
+  if (use) {
     const res = h.use();
     if (res.used) {
       if (res.tool === 'extinguisher' && res.point) {
@@ -336,7 +338,13 @@ function handleActions(h: Heist): void {
         hud.message('Доска установлена', 1.2);
       }
     } else if (res.reason === 'needs-second-point') {
-      hud.message('Вторая точка доски', 1.5);
+      hud.message('Первая точка выбрана. Отпустите кнопку и выберите вторую', 4);
+    } else if (res.tool === 'planks' && res.reason === 'too-close') {
+      hud.message('Выберите вторую точку дальше от первой', 3);
+    } else if (res.tool === 'planks' && res.reason === 'too-far') {
+      hud.message('Доска слишком длинная. Выберите первую точку заново', 3);
+    } else if (res.tool === 'planks' && res.reason === 'no-target') {
+      hud.message('Наведите прицел на поверхность поближе', 3);
     } else if (res.reason === 'no-ammo') {
       hud.message('Пусто', 1);
     }

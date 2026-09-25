@@ -14,6 +14,7 @@ import {
   normalize,
   paint,
   quatIdentity,
+  quatFromEulerYXZ,
   scale,
   sub,
   v3,
@@ -47,7 +48,8 @@ export type ToolFailure =
   | 'no-ammo'
   | 'no-target'
   | 'needs-second-point'
-  | 'too-far';
+  | 'too-far'
+  | 'too-close';
 
 export interface ToolUseResult {
   used: boolean;
@@ -390,6 +392,7 @@ export interface PlankPlacement {
  */
 export class PlankBuilder {
   private pending: Vec3 | null = null;
+  private support: { bodyId: number; shapeId: number; index: number } | null = null;
   /** Толщина доски в вокселях. */
   thickness = 2;
   width = 4;
@@ -400,6 +403,7 @@ export class PlankBuilder {
 
   cancel(): void {
     this.pending = null;
+    this.support = null;
   }
 
   /**
@@ -409,6 +413,7 @@ export class PlankBuilder {
   click(ctx: ToolContext): ToolUseResult {
     const inv = ctx.inventory;
     if (inv.active !== 'planks') return fail('planks', 'no-target');
+    if (inv.cooldown('planks') > 0) return fail('planks', 'cooldown');
     if (!inv.canUse('planks')) return fail('planks', 'no-ammo');
     const stats = inv.activeStats;
     const dir = normalize(ctx.direction);
@@ -421,20 +426,29 @@ export class PlankBuilder {
     const point = add(hit.point, scale(hit.normal, 0.02));
     if (!this.pending) {
       this.pending = point;
+      this.support = { bodyId: hit.body.id, shapeId: hit.shape.id, index: hit.shape.idx(hit.vx, hit.vy, hit.vz) };
       return { used: false, tool: 'planks', reason: 'needs-second-point', point };
     }
 
     const from = this.pending;
     const span = distance(from, point);
     if (span > stats.range) {
-      this.pending = null;
+      this.cancel();
       return fail('planks', 'too-far');
     }
 
-    this.pending = null;
-    inv.consume('planks');
+    if (span < 0.1) return fail('planks', 'too-close');
     const body = buildPlank(ctx.sim.world, from, point, this.width, this.thickness);
-    return { used: true, tool: 'planks', point, spawned: body ?? undefined };
+    if (!body) return fail('planks', 'too-close');
+    const shape = body.shapes[0];
+    const end = { bodyId: hit.body.id, shapeId: hit.shape.id, index: hit.shape.idx(hit.vx, hit.vy, hit.vz) };
+    for (let y = 0; y < shape.sy; y++) for (let z = 0; z < shape.sz; z++) {
+      if (this.support) shape.attachments.set(shape.idx(0, y, z), this.support);
+      shape.attachments.set(shape.idx(shape.sx - 1, y, z), end);
+    }
+    this.cancel();
+    inv.consume('planks');
+    return { used: true, tool: 'planks', point, spawned: body };
   }
 }
 
@@ -487,19 +501,13 @@ export function buildPlank(
 
 /** Кватернион, переводящий +X в заданное направление. */
 export function rotationFromXAxis(dir: Vec3) {
-  const x = v3(1, 0, 0);
   const d = normalize(dir);
   const dotXD = d.x;
   if (dotXD > 0.999999) return quatIdentity();
   if (dotXD < -0.999999) return { x: 0, y: 1, z: 0, w: 0 };
-  const axis = v3(x.y * d.z - x.z * d.y, x.z * d.x - x.x * d.z, x.x * d.y - x.y * d.x);
-  const s = Math.sqrt((1 + dotXD) * 2);
-  return {
-    x: axis.x / s,
-    y: axis.y / s,
-    z: axis.z / s,
-    w: s * 0.5,
-  };
+  // Ширина доски остаётся горизонтальной: кратчайший поворот +X к dir
+  // дополнительно кренил диагональные пандусы на бок.
+  return quatFromEulerYXZ(Math.atan2(-d.z, d.x), 0, Math.asin(d.y));
 }
 
 function rotateBy(q: { x: number; y: number; z: number; w: number }, v: Vec3): Vec3 {
