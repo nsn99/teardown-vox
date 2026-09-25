@@ -80,7 +80,7 @@ export type OpDoc =
   /** Ломаная линия толщиной в воксель — кабель сигнализации. */
   | { op: 'line'; points: Vec3Doc[]; mat: string }
   /** Сырые воксели: сюда попадает импорт из чужих форматов. */
-  | { op: 'voxels'; at: Vec3Doc; size: Vec3Doc; rle: number[] };
+  | { op: 'voxels'; at: Vec3Doc; size: Vec3Doc; rle: number[]; paint?: [number, number][] };
 
 export interface VolumeDoc {
   name: string;
@@ -341,7 +341,19 @@ function parseOp(v: unknown, path: string): OpDoc {
       const total = rle.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0);
       const need = size[0] * size[1] * size[2];
       if (total !== need) fail(`${path}.rle`, `покрывает ${total} вокселей из ${need}`);
-      return { op: 'voxels', at: vec3(o.at, `${path}.at`) as Vec3Doc, size, rle };
+      let paint: [number, number][] | undefined;
+      if (o.paint !== undefined) {
+        if (!Array.isArray(o.paint)) fail(`${path}.paint`, 'ожидался список [индекс, цвет]');
+        paint = (o.paint as unknown[]).map((entry, i) => {
+          if (!Array.isArray(entry) || entry.length !== 2) fail(`${path}.paint[${i}]`, 'ожидалась пара');
+          const pair = entry as unknown[];
+          const index = int(pair[0], `${path}.paint[${i}][0]`, 0);
+          const color = int(pair[1], `${path}.paint[${i}][1]`, 0);
+          if (index >= need || color > 0x1ffffff) fail(`${path}.paint[${i}]`, 'индекс или цвет вне диапазона');
+          return [index, color];
+        });
+      }
+      return { op: 'voxels', at: vec3(o.at, `${path}.at`) as Vec3Doc, size, rle, ...(paint ? { paint } : {}) };
     }
     default:
       return fail(`${path}.op`, `неизвестная операция «${kind}»`);
@@ -723,12 +735,15 @@ function applyOp(shape: VoxelShape, op: OpDoc, path: string): void {
       const [sx, sy, sz] = op.size;
       const buf = new Uint8Array(sx * sy * sz);
       decodeRle(op.rle, buf);
+      const paint = new Map(op.paint);
       for (let y = 0; y < sy; y++) {
         for (let z = 0; z < sz; z++) {
           for (let x = 0; x < sx; x++) {
             const m = buf[x + sx * (z + sz * y)];
             if (m === Mat.Air) continue;
             shape.set(ax + x, ay + y, az + z, m);
+            const color = paint.get(x + sx * (z + sz * y));
+            if (color !== undefined) shape.paint.set(shape.idx(ax + x, ay + y, az + z), color);
           }
         }
       }
@@ -952,6 +967,7 @@ function snapshotVolume(s: VoxelShape): VolumeDoc {
         at: [0, 0, 0],
         size: [s.sx, s.sy, s.sz],
         rle: encodeRle(s.data),
+        paint: [...s.paint],
       },
     ],
   };

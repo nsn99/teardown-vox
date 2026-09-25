@@ -10,14 +10,14 @@
  *
  * Кадры снимаются по шагам симуляции, а не по времени: под SwiftShader
  * страница идёт полтора кадра в секунду, и запись экрана дала бы
- * слайд-шоу. Тридцать снимков склеиваются в ролик на тридцати кадрах в
+ * слайд-шоу. Десять снимков склеиваются в ролик на десяти кадрах в
  * секунду — то есть ролик показывает игровое время, а не время съёмки.
  *
  *   node tools/states/record.mjs [--out shots/states] [--only кирпич]
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -32,6 +32,7 @@ const argValue = (name, fallback) => {
 const outDir = resolve(root, argValue('--out', 'shots/states'));
 const only = argValue('--only', '');
 const PORT = 4323;
+const FPS = 10;
 
 /**
  * Что чем ломаем.
@@ -59,249 +60,138 @@ const MATERIALS = [
 /** Каждый инструмент — по одной кирпичной стенке. */
 const TOOLS = ['sledge', 'shotgun', 'explosive', 'blowtorch', 'spraycan', 'extinguisher', 'planks'];
 
-if (!existsSync(join(root, 'apps/web/dist/index.html'))) {
-  console.error('Нет сборки. Сначала: npm run build');
-  process.exit(1);
-}
+if (!existsSync(join(root, 'apps/web/dist/index.html'))) throw new Error('Сначала npm run build');
 mkdirSync(outDir, { recursive: true });
-const tmp = join(outDir, '.frames');
-
-const server = spawn(
-  'npx',
-  ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'],
-  { cwd: join(root, 'apps/web'), stdio: ['ignore', 'pipe', 'pipe'] },
-);
-const stop = () => {
-  if (!server.killed) server.kill('SIGTERM');
-};
-process.on('exit', stop);
-
-await waitForServer(`http://127.0.0.1:${PORT}/`);
-
-const browser = await chromium.launch({
-  executablePath: findChromium(),
-  args: [
-    '--use-gl=swiftshader',
-    '--enable-unsafe-swiftshader',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-background-networking',
-    '--disable-component-update',
-    '--disable-sync',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-features=Translate,OptimizationHints,MediaRouter',
-  ],
-});
-const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
-await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await page.waitForSelector('#menu:not([hidden])');
-await page.click('#btn-sandbox').catch(() => page.click('#btn-mission'));
-await page.waitForFunction(
-  () => (window.tvox?.renderer?.stats?.dirty ?? 1) === 0 && (window.tvox?.renderer?.stats?.chunks ?? 0) > 0,
-  undefined,
-  { timeout: 240000, polling: 250 },
-);
-
-// Свободное место во дворе: стенд ставим там, где ничего не мешает.
-// Блок 1.4 м, игрок в двух шагах и смотрит ему в середину.
-const STAND = { x: 34, y: 0.02, z: 27 };
-const EYE = { x: 34.9, y: 0.05, z: 28.9 };
-
+const server = spawn('npm', ['run', 'preview', '--workspace', 'apps/web', '--', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'ignore' });
+let browser;
 const made = [];
-
-for (const m of MATERIALS) {
-  if (only && !m.name.includes(only) && !m.label.includes(only)) continue;
-  await clip(`материал-${m.name}`, `${m.label} × ${m.tool}`, m.name, m.tool);
-}
-for (const tool of TOOLS) {
-  if (only && !tool.includes(only)) continue;
-  await clip(`инструмент-${tool}`, `${tool} × кирпич`, 'brick', tool);
-}
-if (!only) await collapse();
-
-writeFileSync(
-  join(outDir, 'README.md'),
-  ['# Ролики состояний', '', 'Снято: ' + new Date().toISOString(), '', ...made.map((m) => `- ${m}`), ''].join('\n'),
-  'utf8',
-);
-console.log(`Готово: ${made.length} роликов в ${outDir}`);
-
-await browser.close().catch(() => {});
-stop();
-setTimeout(() => process.exit(0), 1000).unref();
-
-/** Один ролик: ставим блок, снимаем целым, бьём, снимаем до конца. */
-async function clip(file, title, material, tool) {
-  process.stdout.write(`… ${title}\n`);
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
-
-  const id = await page.evaluate(
-    ([mat, stand, eye]) => {
-      window.tvox.look(eye.x, eye.y, eye.z, 0, -0.25);
-      // Инструменты на максимуме: ролик показывает, как материал ломается,
-      // а не как первая ступень его не берёт. Бессилие — тоже поведение,
-      // но у него своё место в тестах, а не в справочнике состояний.
-      window.tvox.upgradeAll();
-      return window.tvox.stand(mat, stand.x, stand.y, stand.z, 18);
-    },
-    [material, STAND, EYE],
-  );
-  if (id < 0) {
-    console.error(`  материал «${material}» не найден`);
-    return;
-  }
-  await settle();
-
-  let n = 0;
-  const shot = async () => {
-    await page.screenshot({ path: join(tmp, `${String(n++).padStart(4, '0')}.png`) });
-  };
-
-  // Цел: несколько кадров, чтобы состояние успело прочитаться.
-  for (let i = 0; i < 6; i++) await shot();
-
-  let left = await page.evaluate((b) => window.tvox.standLeft(b), id);
-  const start = left;
-  let hits = 0;
-  for (let i = 0; i < 24 && left > 0; i++) {
-    // Целимся не в одну точку: пробив дыру, луч уходит сквозь неё, и
-    // дальше инструмент бьёт по воздуху. Игрок так не делает — он ведёт
-    // по стене, и ролик должен показывать именно это.
-    hits += await page.evaluate(
-      ([t, e, k]) => {
-        const yaw = ((k % 6) - 2.5) * 0.12;
-        const pitch = -0.5 + Math.floor(k / 6) * 0.1;
-        window.tvox.look(e.x, e.y, e.z, yaw, pitch);
-        return window.tvox.swing(t);
-      },
-      [tool, EYE, i],
-    );
-    await page.waitForTimeout(120);
-    await settle(6000);
-    await shot();
-    left = await page.evaluate((b) => window.tvox.standLeft(b), id);
-  }
-  for (let i = 0; i < 4; i++) await shot();
-
-  encode(file, title);
-  // Второе число — то, что осталось от стенда. Третье — сколько вокселей
-  // сняли по сцене вообще: у дробовика конус уходит за стенку и цепляет
-  // всё, что за ней, поэтому оно бывает больше самого стенда.
-  made.push(`${title}: стенд ${start} → ${left}, по сцене снято ${hits}`);
-  await page.evaluate((b) => {
-    const world = window.tvox.heist.sim.world;
-    const body = world.bodies.get(b);
-    if (body) world.removeBody(body);
-  }, id);
-  await settle();
-}
-
-/** Полное обрушение склада в игровом масштабе. */
-async function collapse() {
-  process.stdout.write('… обрушение склада\n');
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
-  await page.evaluate(() => window.tvox.look(40, 6, 40, Math.PI * 0.78, -0.18));
-  await settle(120000);
-
-  let n = 0;
-  const shot = async () => page.screenshot({ path: join(tmp, `${String(n++).padStart(4, '0')}.png`) });
-  for (let i = 0; i < 4; i++) await shot();
-
-  // Бьём по несущим: смысл записи — обрушение, а не дырки в стене.
-  const points = [
-    [10, 1.2, 16],
-    [22, 1.2, 16],
-    [10, 1.2, 28],
-    [22, 1.2, 28],
-    [16, 1.2, 22],
-  ];
-  for (const p of points) {
-    await page.evaluate((c) => {
-      return window.tvox.core.carve(
-        window.tvox.heist.sim.world,
-        { kind: 'sphere', center: { x: c[0], y: c[1], z: c[2] }, radius: 2.2 },
-        { power: 1, damage: 1, instant: true, falloff: 'quadratic', cause: 'debug' },
-      ).removed;
-    }, p);
-    for (let i = 0; i < 6; i++) {
-      await page.waitForTimeout(150);
-      await shot();
+const errors = [];
+try {
+  await waitForServer(`http://127.0.0.1:${PORT}`);
+  browser = await chromium.launch({ executablePath: findChromium(), args: ['--no-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] });
+  const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') errors.push(message.text());
+    if (message.text().startsWith('[capture]')) console.log(message.text());
+  });
+  await page.goto(`http://127.0.0.1:${PORT}`);
+  await page.waitForSelector('#btn-sandbox');
+  await page.click('#btn-sandbox');
+  const jobs = MATERIALS.map(m => ({file: `материал-${m.name}`, mat: m.name, tool: m.tool, title: m.label}));
+  jobs.push(...TOOLS.map(tool => ({file: `инструмент-${tool}`, mat: tool === 'extinguisher' ? 'wood' : 'brick', tool, title: tool})));
+  for (const job of jobs) {
+    if (only && !`${job.file} ${job.title}`.includes(only)) continue;
+    console.log(`… ${job.file}`);
+    await page.evaluate(() => window.tvox.captureStart());
+    const id = await page.evaluate(mat => {
+      const t = window.tvox;
+      t.upgradeAll();
+      t.look(34.9, .05, 29.2, 0, -.4);
+      return t.stand(mat, 34, .02, 27, 18);
+    }, job.mat);
+    const tmp = join(outDir, '.frames', job.file);
+    mkdirSync(tmp, {recursive: true});
+    const start = await page.evaluate(id => window.tvox.standLeft(id), id);
+    for (let frame = 0; frame < 40; frame++) {
+      if (frame >= 6 && frame < 32 && frame % 2 === 0) {
+        await page.evaluate(({id, tool, frame}) => {
+          const t = window.tvox, h = t.heist, body = h.sim.world.bodies.get(id);
+          h.inventory.select(tool); h.inventory.tick(10);
+          // Целимся в существующую клетку стенда, не стреляем в фон сквозь дыру.
+          const shape = body?.shapes[0];
+          const targets = [];
+          if (shape) for (let y = 3; y < shape.sy; y++) for (let x = 0; x < shape.sx; x++) {
+            for (let z = shape.sz - 1; z >= 0; z--) if (shape.get(x,y,z)) {
+              targets.push(shape.voxelCenterWorld(x,y,z,body.transform)); break;
+            }
+          }
+          if (!targets.length) return;
+          const point = targets[Math.floor(((frame - 6) / 26) * (targets.length - 1))];
+          const eye = h.eye, dx = point.x-eye.x, dy = point.y-eye.y, dz = point.z-eye.z;
+          h.yaw = Math.atan2(-dx, -dz); h.pitch = Math.atan2(dy, Math.hypot(dx,dz));
+          if (tool === 'extinguisher' && frame === 6) h.sim.fire.igniteArea(h.sim.world, point, 1, 1);
+          if (tool === 'explosive') {
+            if (frame === 6 || frame === 8) h.use();
+            if (frame === 12) h.detonate();
+          } else h.use();
+        }, {id, tool: job.tool, frame});
+      }
+      await shot(page, tmp, frame);
     }
+    const end = await page.evaluate(id => window.tvox.standLeft(id), id);
+    encode(job.file, tmp, 40);
+    made.push({ ...job, start, end, frames: 40 });
+    console.log(`  ✓ ${start} → ${end}`);
   }
-  for (let i = 0; i < 30; i++) {
-    await page.waitForTimeout(200);
-    await shot();
-  }
-  encode('обрушение-склада', 'полное обрушение склада');
-  made.push('полное обрушение склада');
-}
-
-/** Кадры в ролик. Игровое время, тридцать кадров в секунду. */
-function encode(file, title) {
-  const out = join(outDir, `${file}.webm`);
-  const res = spawnSync('ffmpeg', [
-    '-y',
-    '-loglevel', 'error',
-    '-framerate', '8',
-    '-i', join(tmp, '%04d.png'),
-    '-c:v', 'libvpx-vp9',
-    '-b:v', '0',
-    '-crf', '38',
-    '-pix_fmt', 'yuv420p',
-    out,
-  ], { encoding: 'utf8' });
-  if (res.status !== 0) {
-    console.error(`  ffmpeg не собрал ролик «${title}»: ${res.stderr}`);
-    return;
-  }
-  const frames = readdirSync(tmp).length;
-  process.stdout.write(`  ✓ ${title}: ${frames} кадров → ${file}.webm\n`);
-}
-
-async function settle(timeout = 60000) {
-  const started = Date.now();
-  let best = Infinity;
-  let moved = started;
-  for (;;) {
-    const dirty = await page.evaluate(() => window.tvox?.renderer?.stats?.dirty ?? -1);
-    if (dirty === 0) {
-      await page.waitForTimeout(200);
-      return;
+  if (!only || only === 'collapse') {
+    console.log('… обрушение-склада');
+    await page.evaluate(() => window.tvox.captureStart(false));
+    await page.evaluate(() => {
+      const t = window.tvox;
+      t.look(36, 11, 40, 0, 0);
+      const eye = t.heist.eye, dx = 16-eye.x, dy = 4-eye.y, dz = 22-eye.z;
+      t.heist.yaw = Math.atan2(-dx,-dz); t.heist.pitch = Math.atan2(dy,Math.hypot(dx,dz));
+      t.renderer.setDaylight('day');
+    });
+    const tmp = join(outDir, '.frames', 'обрушение-склада');
+    mkdirSync(tmp, {recursive: true});
+    let detached = 0;
+    for (let frame = 0; frame < 90; frame++) {
+      if ([10,20,30,40].includes(frame)) {
+        console.log(`  сектор ${frame / 10}`);
+        const n = frame/10-1;
+        detached += await page.evaluate(n => {
+          const t = window.tvox, world = t.heist.sim.world;
+          const started = performance.now();
+          t.core.carve(world, {kind:'box', center:{x: n%2 ? 22:10, y:1, z:n<2 ? 18:28}, halfExtents:{x:6,y:.4,z:5}}, {power:2,damage:0,instant:true,falloff:'none',cause:'capture-support-cut'});
+          console.log('[capture] carve ms', performance.now()-started);
+          const result = t.heist.sim.settle().detachedVoxels;
+          console.log('[capture] settle ms', performance.now()-started, 'detached', result);
+          return result;
+        }, n);
+      }
+      await shot(page, tmp, frame);
+      if (frame % 10 === 0) console.log(`  кадр ${frame}`);
     }
-    if (dirty >= 0 && dirty < best) {
-      best = dirty;
-      moved = Date.now();
-    }
-    if (Date.now() - moved > 15000 || Date.now() - started > timeout) return;
-    await page.waitForTimeout(250);
+    const fragments = await page.evaluate(() => [...window.tvox.heist.sim.world.bodies.values()].filter(b => b.kind === 'dynamic').length);
+    if (detached === 0) throw new Error('Опоры удалены, но ничего не отделилось');
+    encode('обрушение-склада', tmp, 90);
+    made.push({file:'обрушение-склада', frames:90, detached, fragments});
+    console.log(`  ✓ отделено ${detached} вокселей`);
   }
+  if (errors.length) throw new Error(errors.join('\n'));
+  if (!only && made.length !== 20) throw new Error(`Ожидалось 20 роликов, получено ${made.length}`);
+  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify({fps:FPS, recorded:new Date().toISOString(), clips:made}, null, 2));
+  writeFileSync(join(outDir, 'README.md'), '# Ролики состояний\n\nФиксированный шаг 1/60 с, 10 кадров/с. Каждый стенд начинает чистую сцену.\n\n'+made.map(m => `- ${m.file}: ${m.start ?? ''} → ${m.end ?? m.detached}`).join('\n')+'\n');
+  console.log(`Готово: ${made.length} роликов`);
+} finally {
+  await browser?.close();
+  server.kill('SIGTERM');
 }
 
+async function shot(page, tmp, n) {
+  await page.evaluate(() => window.tvox.captureStep(1/10));
+  await page.waitForFunction(() => window.tvox.renderer.stats.dirty === 0, undefined, {timeout:60000, polling:50});
+  await page.screenshot({path:join(tmp, `${String(n).padStart(4,'0')}.png`)});
+}
+function encode(file, tmp, count) {
+  const res = spawnSync('ffmpeg', ['-y','-loglevel','error','-framerate',String(FPS),'-i',join(tmp,'%04d.png'),'-frames:v',String(count),'-c:v','libvpx-vp9','-b:v','0','-crf','34','-pix_fmt','yuv420p',join(outDir,`${file}.webm`)], {encoding:'utf8'});
+  if (res.status !== 0) throw new Error(`ffmpeg: ${res.stderr || res.error}`);
+}
 function findChromium() {
   const base = process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/pw-browsers';
-  try {
-    for (const d of readdirSync(base).filter((x) => x.startsWith('chromium-'))) {
-      const p = join(base, d, 'chrome-linux', 'chrome');
-      if (existsSync(p)) return p;
+  if (!existsSync(base)) return undefined;
+  for (const dir of readdirSync(base).filter(x=>x.startsWith('chromium-'))) {
+    for (const folder of ['chrome-linux','chrome-linux64']) {
+      const path = join(base,dir,folder,'chrome'); if (existsSync(path)) return path;
     }
-  } catch {
-    return undefined;
   }
-  return undefined;
 }
-
 async function waitForServer(url) {
-  for (let i = 0; i < 120; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* ещё поднимается */
-    }
-    await new Promise((r) => setTimeout(r, 250));
+  for (let i=0; i<120; i++) {
+    try { if ((await fetch(url)).ok) return; } catch { /* старт сервера */ }
+    await new Promise(resolve=>setTimeout(resolve,250));
   }
-  throw new Error('Сервер предпросмотра не поднялся');
+  throw new Error('Preview не поднялся');
 }

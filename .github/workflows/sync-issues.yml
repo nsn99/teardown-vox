@@ -1,0 +1,23 @@
+name: Sync issues and close completed milestones
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run issues:plan
+      - run: npm run issues:sync -- --close-done
+        env:
+          GH_TOKEN: ${{ github.token }}

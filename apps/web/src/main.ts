@@ -27,7 +27,7 @@ import {
   stepStructure,
   v3,
 } from '@tvox/core';
-import { FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { ChargeView, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -38,7 +38,8 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const renderer = new VoxelRenderer({ canvas, quality: 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
-renderer.scene.add(particles.points, fireLights.group);
+const chargeView = new ChargeView();
+renderer.scene.add(particles.points, fireLights.group, chargeView.group);
 const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
@@ -60,6 +61,8 @@ let last = performance.now();
 let thirdPerson = false;
 /** Сглаженная длительность кадра, мс — для честного счётчика кадров. */
 let smoothedFrame = 16;
+let captureMode = false;
+let physicsReady: Promise<void> = Promise.resolve();
 
 const menu = new Menu({
   onMission: () => startRun(false),
@@ -117,6 +120,7 @@ function startRun(inSandbox: boolean): void {
   sandbox = inSandbox;
   heist?.sim.dispose();
   particles.clear();
+  chargeView.update([]);
 
   heist = new Heist({ level, profile, sandbox: inSandbox });
   heist.start();
@@ -126,7 +130,7 @@ function startRun(inSandbox: boolean): void {
   renderer.setDaylight(level.environment?.daylight ?? 'dusk');
   renderer.setLevelLights(level.environment?.lights ?? []);
   wireEvents(heist);
-  upgradeToRapier(heist);
+  physicsReady = upgradeToRapier(heist);
 
   audioOff?.();
   audioOff = audio.listen(heist.sim.world);
@@ -164,6 +168,7 @@ async function upgradeToRapier(h: Heist): Promise<void> {
       protectedMaterials: h.protectedMaterials(),
     });
     if (heist === h) h.sim.setPhysics(physics);
+    else physics.dispose();
   } catch (err) {
     console.warn('Rapier не загрузился, остаёмся на встроенной физике', err);
   }
@@ -172,6 +177,7 @@ async function upgradeToRapier(h: Heist): Promise<void> {
 function wireEvents(h: Heist): void {
   h.sim.world.events.on('voxels:removed', (e) => {
     if (e.count > 0) particles.emitSmoke(e.center, Math.min(6, 1 + e.count / 40), 0.8);
+    if (e.debris) particles.emitDebris(e.debris, e.cause === 'explosive' ? 1.5 : 1);
   });
 
   h.sim.world.events.on('impact', (e) => {
@@ -346,13 +352,13 @@ function frame(now: number): void {
   const raw = (now - last) / 1000;
   last = now;
   // Огромный dt после сворачивания вкладки не должен телепортировать мир.
-  const dt = clamp(raw, 0, 0.1);
+  const dt = captureMode ? 0 : clamp(raw, 0, 0.1);
   smoothedFrame += (raw * 1000 - smoothedFrame) * 0.1;
 
   if (!heist) return;
   const h = heist;
 
-  if (!paused && input.locked) {
+  if (!captureMode && !paused && input.locked) {
     const look = input.consumeLook();
     h.yaw += look.yaw;
     h.pitch = clamp(h.pitch + look.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
@@ -366,7 +372,7 @@ function frame(now: number): void {
   particles.step(dt);
   fireLights.update(h.sim.fire.burningPoints(), h.sim.world.time);
   for (const p of h.sim.fire.burningPoints()) {
-    if (Math.random() < 0.06) particles.emitFire(p.position, p.heat);
+    if (!captureMode && Math.random() < 0.06) particles.emitFire(p.position, p.heat);
   }
 
   // Слушатель — там же, где камера: звук должен приходить оттуда, куда
@@ -397,7 +403,7 @@ function frame(now: number): void {
   let clouds = 0;
   for (const c of h.sim.smoke.clouds()) {
     if (c.density < 0.25 || clouds++ > 24) continue;
-    if (Math.random() < c.density * 0.25) particles.emitSmoke(c.position, 1, 1.6);
+    if (!captureMode && Math.random() < c.density * 0.25) particles.emitSmoke(c.position, 1, 1.6);
   }
 
   const shake = h.shakeState;
@@ -408,6 +414,7 @@ function frame(now: number): void {
     shake.roll,
   );
   renderer.sync(h.sim.world);
+  chargeView.update(h.charges.list());
   renderer.render();
 
   hud.update(
@@ -448,6 +455,8 @@ declare global {
       upgradeAll(): void;
       /** Сколько вокселей осталось в теле стенда. */
       standLeft(id: number): number;
+      captureStart(isolated?: boolean): Promise<void>;
+      captureStep(seconds: number): void;
     };
   }
 }
@@ -458,6 +467,43 @@ window.tvox = {
   },
   renderer,
   particles,
+  async captureStart(isolated = true) {
+    captureMode = true;
+    level = isolated ? {
+      ...portLevel,
+      id: 'material-stage', name: 'Стенд материалов',
+      spawn: { position: v3(34.9, 0.05, 29.2), yaw: 0 },
+      vehicles: [], triggers: [], routes: [],
+      environment: { daylight: 'day', lights: [] },
+      mission: { ...portLevel.mission, targets: [] },
+      build(sim) {
+        const floor = new VoxelShape({sx: 80, sy: 2, sz: 80, voxelSize: 0.1, grounded: true});
+        floor.fill({}, Mat.Foundation);
+        floor.structural = false;
+        floor.transform.position = v3(31, -0.2, 24);
+        const body = new Body({kind: 'static', shapes: [floor]});
+        sim.world.addBody(body);
+        return [body];
+      },
+    } : portLevel;
+    startRun(true);
+    // Запись не начинает физику до загрузки того же солвера, что у игры.
+    await physicsReady;
+    if (!(heist!.sim.physics instanceof RapierPhysics)) throw new Error('Запись требует Rapier');
+  },
+  captureStep(seconds) {
+    if (!heist || !captureMode) return;
+    const steps = Math.round(seconds * 60);
+    for (let i = 0; i < steps; i++) {
+      heist.sim.step(1 / 60);
+      heist.charges.step(heist.sim, 1 / 60);
+      heist.inventory.tick(1 / 60);
+      particles.step(1 / 60);
+    }
+    renderer.sync(heist.sim.world);
+    chargeView.update(heist.charges.list());
+    renderer.render();
+  },
   blast(radius = 3) {
     if (!heist) return 0;
     const h = heist;
@@ -466,7 +512,6 @@ window.tvox = {
     const res = explode(h.sim.world, { center, radius, power: 1.4, cause: 'debug' });
     h.sim.physics.applyRadialImpulse(center, radius * 2, 1200);
     h.sim.settle();
-    particles.emitDebris(res.debris, 1.5);
     return res.removed;
   },
   look(x, y, z, yaw, pitch) {

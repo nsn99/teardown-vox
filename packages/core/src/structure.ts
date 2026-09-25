@@ -60,8 +60,8 @@ const DEFAULTS = {
 } satisfies Required<StructureOptions>;
 
 /**
- * Признак якоря: воксель либо сам из якорного материала (фундамент, скала,
- * грунт), либо лежит в нижнем слое формы, помеченной как стоящая на земле.
+ * Признак якоря: воксель либо сам из якорного материала (фундамент),
+ * либо лежит в нижнем слое формы, помеченной как стоящая на земле.
  */
 export function isAnchorVoxel(shape: VoxelShape, x: number, y: number, z: number): boolean {
   const mat = shape.data[shape.idx(x, y, z)];
@@ -681,10 +681,10 @@ function supportersBelow(
 
 
 /**
- * Мельче этого объёма форму считаем целиком: частичный проход по кубику
- * 32³ не окупает возни с границами.
+ * Компактные здания считаем целиком: после выпадения оконного листа
+ * нагрузка перераспределяется через всю стену, включая границы чанков.
  */
-const PARTIAL_STRESS_MIN_VOLUME = 1 << 19;
+const PARTIAL_STRESS_MIN_VOLUME = 1 << 20;
 /**
  * Запас вокруг задетых чанков. Нагрузка с повисшего куска расходится по
  * слою до ближайших опор, и почти всегда они рядом; а кусок, который
@@ -822,6 +822,7 @@ export function extractFragment(
     sourceShape.coords(i, c);
     const mat = sourceShape.data[i];
     fragShape.set(c.x - minX, c.y - minY, c.z - minZ, mat);
+    fragShape.damage[fragShape.idx(c.x - minX, c.y - minY, c.z - minZ)] = sourceShape.damage[i];
     const paintColor = sourceShape.paint.get(i);
     if (paintColor !== undefined) {
       fragShape.paint.set(fragShape.idx(c.x - minX, c.y - minY, c.z - minZ), paintColor);
@@ -920,7 +921,15 @@ export function solveBodyStructure(
     loose.sort((a, b) => b.length - a.length);
 
     let spawned = 0;
-    for (const comp of loose) {
+    for (const component of loose) {
+      // Листва не образует твёрдых обломков даже при потере опоры.
+      const comp = component.filter(i => {
+        if (shape.data[i] !== Mat.Foliage) return true;
+        shape.setAt(i, Mat.Air);
+        result.dustVoxels++;
+        return false;
+      });
+      if (comp.length === 0) continue;
       if (comp.length < cfg.minFragmentVoxels || spawned >= cfg.maxFragmentsPerStep) {
         for (const i of comp) shape.setAt(i, Mat.Air);
         result.dustVoxels += comp.length;

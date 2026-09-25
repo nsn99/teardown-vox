@@ -197,6 +197,11 @@ export function voxToShape(file: VoxFile, modelIndex = 0, opts: VoxImportOptions
     const m = table[v[i + 3]];
     if (m === Mat.Air) continue;
     shape.set(v[i], v[i + 2], v[i + 1], m);
+    if (file.palette) {
+      const at = (v[i + 3] - 1) * 4;
+      const rgb = (file.palette[at] << 16) | (file.palette[at + 1] << 8) | file.palette[at + 2];
+      shape.paint.set(shape.idx(v[i], v[i + 2], v[i + 1]), 0x1000000 + rgb);
+    }
   }
   return shape;
 }
@@ -227,6 +232,7 @@ export function voxToVolume(
         at: [0, 0, 0],
         size: [shape.sx, shape.sy, shape.sz],
         rle: encodeRle(shape.data),
+        paint: [...shape.paint],
       },
     ],
   };
@@ -269,7 +275,7 @@ export function voxSandboxDoc(
     voxelSize,
     // Воды нет: ставить уровень моря по чужой модели — гадание.
     waterLevel: -1000,
-    spawn: { position: [cornerX, 0.05, cornerZ], yaw: Math.PI * 0.75 },
+    spawn: { position: [cornerX, 0.05, cornerZ], yaw: -Math.PI * 0.75 },
     volumes: [
       {
         name: 'площадка',

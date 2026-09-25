@@ -422,6 +422,15 @@ export class VoxelRenderer {
         `#include <lights_fragment_begin>
          irradiance *= mix( uSkyFloor, 1.0, vSky );`,
       );
+      fragment = patch(
+        fragment,
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+         // Широкое отражение неба: без environment map стандартный PBR
+         // оставляет металл чёрным везде, кроме прямого солнечного блика.
+         // irradiance уже затенена воксельным небесным светом.
+         reflectedLight.indirectSpecular += irradiance * diffuseColor.rgb * metalnessFactor * RECIPROCAL_PI;`,
+      );
 
       if (missing.length > 0) {
         console.warn(

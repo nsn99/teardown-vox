@@ -127,7 +127,6 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
       color: [110, 108, 104],
       maxStress: 3_000_000,
       maxMoment: 3_000,
-      anchor: true,
     }),
   );
   put(
@@ -137,8 +136,7 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
       hp: 30,
       color: [92, 70, 48],
       maxStress: 400_000,
-      maxMoment: 150,
-      anchor: true,
+      maxMoment: 0,
       roughness: 1,
     }),
   );
@@ -202,14 +200,13 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
   put(
     def(Mat.HeavyMetal, 'heavy_metal', {
       density: 7900,
-      toughness: 0.72,
+      toughness: 1,
       hp: 320,
       color: [86, 92, 100],
       maxStress: 8_000_000,
       maxMoment: 25_000,
       metalness: 0.95,
       roughness: 0.3,
-      anchor: true,
     }),
   );
   put(
@@ -255,7 +252,7 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
     def(Mat.Foliage, 'foliage', {
       density: 300,
       toughness: 0.02,
-      hp: 8,
+      hp: 1,
       color: [70, 112, 52],
       flammability: 1,
       fuel: 10,

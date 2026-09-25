@@ -23,11 +23,12 @@ export interface ChunkSlice {
   voxelSize: number;
   /** Материалы куска в раскладке формы: (y*sz + z)*sx + x. */
   data: Uint8Array;
+  damage: Uint16Array;
   /** Небесный свет того же куска. Вне формы — открытое небо. */
   sky: Uint8Array;
   /** Разреженная краска: индексы внутри куска и номера цветов. */
   paintIndex: Uint32Array;
-  paintValue: Uint8Array;
+  paintValue: Uint32Array;
   /** Что именно мешить, в координатах куска. */
   region: VoxelRegion;
   /** Непустых вокселей в регионе — чтобы пустой не мешить вовсе. */
@@ -36,7 +37,7 @@ export interface ChunkSlice {
 
 /** Буферы куска: их отдают воркеру во владение, а не копируют ещё раз. */
 export function sliceBuffers(slice: ChunkSlice): ArrayBufferLike[] {
-  return [slice.data.buffer, slice.sky.buffer, slice.paintIndex.buffer, slice.paintValue.buffer];
+  return [slice.data.buffer, slice.damage.buffer, slice.sky.buffer, slice.paintIndex.buffer, slice.paintValue.buffer];
 }
 
 /**
@@ -56,6 +57,7 @@ export function sliceChunk(
   const sz = region.z1 - region.z0 + 2;
 
   const data = new Uint8Array(sx * sy * sz);
+  const damage = new Uint16Array(data.length);
   const skyData = new Uint8Array(sx * sy * sz);
   let solid = 0;
 
@@ -80,6 +82,7 @@ export function sliceChunk(
         }
         const m = rowSolid === 0 ? 0 : shape.data[shape.idx(wx, wy, wz)];
         data[row + x] = m;
+        damage[row + x] = shape.damage?.[shape.idx(wx, wy, wz)] ?? 0;
         skyData[row + x] = sky ? sky.at(wx, wy, wz) : SKY_MAX;
         if (
           m !== 0 &&
@@ -118,9 +121,10 @@ export function sliceChunk(
     sz,
     voxelSize: shape.voxelSize,
     data,
+    damage,
     sky: skyData,
     paintIndex: Uint32Array.from(paintIndex),
-    paintValue: Uint8Array.from(paintValue),
+    paintValue: Uint32Array.from(paintValue),
     region: {
       x0: region.x0 - ox,
       y0: region.y0 - oy,
@@ -146,6 +150,7 @@ export class ChunkView implements MeshSource {
   readonly sz: number;
   readonly voxelSize: number;
   readonly data: Uint8Array;
+  readonly damage: Uint16Array;
   readonly paint = new Map<number, number>();
   private readonly skyData: Uint8Array;
   private readonly rowSolid: Uint32Array;
@@ -159,6 +164,7 @@ export class ChunkView implements MeshSource {
     this.sz = slice.sz;
     this.voxelSize = slice.voxelSize;
     this.data = slice.data;
+    this.damage = slice.damage;
     this.skyData = slice.sky;
     this.bounds = slice.region;
     this.solid = slice.solid;

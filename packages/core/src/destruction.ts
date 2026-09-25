@@ -69,6 +69,7 @@ export interface TouchedShape {
   removed: number;
   damaged: number;
   materials: Map<number, number>;
+  debris: DebrisSample[];
 }
 
 export interface CarveResult {
@@ -321,6 +322,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
       const s = shape.voxelSize;
       let shapeRemoved = 0;
       let shapeDamaged = 0;
+      const debrisStart = result.debris.length;
       const shapeMaterials = new Map<number, number>();
       const region: VoxelRegion = { x0: x1, y0: y1, z0: z1, x1: x0, y1: y0, z1: z0 };
 
@@ -355,7 +357,40 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             // Иначе кувалда, сила которой чуть выше прочности кирпича,
             // грызёт пятно в один воксель, и игрок решает, что она сломана.
             const gate = opts.instant ? opts.power * w : opts.power;
-            if (gate <= def.toughness) continue;
+            if (gate <= def.toughness) {
+              // Вмятина не накапливается до пробоя стали кувалдой.
+              if (mat === Mat.Metal && cause === 'sledge') {
+                shape.damage[i] = Math.min(def.hp - 1, shape.damage[i] + Math.max(1, Math.round(opts.damage * w)));
+                shape.markDirty(x, y, z);
+                shapeDamaged++;
+                expand(region, x, y, z);
+              }
+              continue;
+            }
+
+            // Трещина проходит по связанному листу, но не перескакивает
+            // через раму. Общий бюджет разрушения действует и здесь.
+            if (mat === Mat.Glass) {
+              const queue = [i];
+              const seen = new Set(queue);
+              for (let q = 0; q < queue.length && result.removed < maxVoxels; q++) {
+                const at = queue[q];
+                const gx = at % shape.sx;
+                const gz = Math.floor(at / shape.sx) % shape.sz;
+                const gy = Math.floor(at / (shape.sx * shape.sz));
+                removeVoxel(shape, at, mat, result, shapeMaterials, body, gx, gy, gz);
+                shapeRemoved++;
+                expand(region, gx, gy, gz);
+                for (const [nx, ny, nz] of [[gx-1,gy,gz], [gx+1,gy,gz], [gx,gy-1,gz], [gx,gy+1,gz], [gx,gy,gz-1], [gx,gy,gz+1]]) {
+                  if (nx < 0 || ny < 0 || nz < 0 || nx >= shape.sx || ny >= shape.sy || nz >= shape.sz) continue;
+                  const next = shape.idx(nx, ny, nz);
+                  if (shape.data[next] !== Mat.Glass || seen.has(next)) continue;
+                  seen.add(next);
+                  queue.push(next);
+                }
+              }
+              continue;
+            }
 
             if (opts.instant) {
               removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z);
@@ -392,6 +427,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
           removed: shapeRemoved,
           damaged: shapeDamaged,
           materials: shapeMaterials,
+          debris: result.debris.slice(debrisStart),
         });
       }
     }
@@ -417,6 +453,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
       center: result.center,
       materials: t.materials,
       cause,
+      debris: t.debris,
     });
   }
 
@@ -447,7 +484,7 @@ function removeVoxel(
   result.removed++;
   result.byMaterial.set(mat, (result.byMaterial.get(mat) ?? 0) + 1);
   shapeMaterials.set(mat, (shapeMaterials.get(mat) ?? 0) + 1);
-  if (result.debris.length < MAX_DEBRIS_SAMPLES) {
+  if (mat !== Mat.Foliage && result.debris.length < MAX_DEBRIS_SAMPLES) {
     result.debris.push({
       position: shape.voxelCenterWorld(x, y, z, body.transform),
       material: mat,

@@ -68,6 +68,13 @@ const fail = (tool: ToolId, reason: ToolFailure): ToolUseResult => ({
   reason,
 });
 
+/** Бетон вскрывают зарядом или техникой, сталь — горелкой или зарядом. */
+function toolProtection(ctx: ToolContext): ReadonlySet<number> {
+  const protectedMaterials = new Set(ctx.protect);
+  protectedMaterials.add(Mat.Concrete);
+  return protectedMaterials;
+}
+
 /**
  * Применение активного инструмента к миру.
  *
@@ -130,7 +137,7 @@ export function useTool(ctx: ToolContext): ToolUseResult {
           damage: stats.damage,
           falloff: 'linear',
           cause: 'shotgun',
-          protect: ctx.protect,
+          protect: toolProtection(ctx),
           ignoreBodies: ctx.ignoreBodies,
         },
       );
@@ -191,7 +198,7 @@ function sphereCarve(
       damage,
       falloff: 'linear',
       cause,
-      protect: ctx.protect,
+      protect: toolProtection(ctx),
       ignoreBodies: ctx.ignoreBodies,
     },
   );
@@ -216,7 +223,7 @@ function capsuleCarve(
       damage,
       falloff: 'none',
       cause: 'blowtorch',
-      protect: ctx.protect,
+      protect: toolProtection(ctx),
       ignoreBodies: ctx.ignoreBodies,
     },
   );

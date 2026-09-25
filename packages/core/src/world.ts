@@ -14,6 +14,7 @@ export interface VoxelsRemovedEvent {
   materials: Map<number, number>;
   /** Источник: инструмент, взрыв, огонь, удар. */
   cause: string;
+  debris?: readonly { position: Vec3; material: number }[];
 }
 
 export interface BodySplitEvent {

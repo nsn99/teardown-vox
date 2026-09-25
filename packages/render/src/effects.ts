@@ -117,14 +117,15 @@ export class ParticleSystem {
   emitDebris(samples: readonly DebrisSample[], power = 1): void {
     for (const d of samples) {
       const col = MATERIALS[d.material].color;
+      const speed = power * Math.min(1, Math.sqrt(700 / MATERIALS[d.material].density));
       this.spawn({
         kind: 'debris',
         x: d.position.x,
         y: d.position.y,
         z: d.position.z,
-        vx: this.rand(-2, 2) * power,
-        vy: this.rand(0.5, 4) * power,
-        vz: this.rand(-2, 2) * power,
+        vx: this.rand(-2, 2) * speed,
+        vy: this.rand(0.5, 4) * speed,
+        vz: this.rand(-2, 2) * speed,
         maxLife: this.rand(0.6, 1.8),
         size: this.rand(0.04, 0.1),
         r: col[0] / 255,

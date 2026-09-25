@@ -37,6 +37,18 @@ function ctxFor(sim: Simulation, tool: ToolId, tier = 0, unlimited = false): Too
 }
 
 describe('кувалда', () => {
+  it.each(['sledge', 'shotgun', 'blowtorch'] as const)('%s максимальной ступени не пробивает бетон', (tool) => {
+    const { sim, shape } = wallWorld(Mat.Concrete);
+    const ctx = ctxFor(sim, tool, 3, true);
+    for (let i = 0; i < 40; i++) { useTool(ctx); ctx.inventory.tick(10); }
+    expect(shape.solidVoxels).toBe(4800);
+  });
+  it.each([['shotgun', Mat.Metal], ['blowtorch', Mat.HeavyMetal]] as const)('%s не пробивает защищённый материал %i', (tool, mat) => {
+    const { sim, shape } = wallWorld(mat);
+    const ctx = ctxFor(sim, tool, 3, true);
+    for (let i = 0; i < 40; i++) { useTool(ctx); ctx.inventory.tick(10); }
+    expect(shape.solidVoxels).toBe(4800);
+  });
   it('снимает кирпич за несколько ударов', () => {
     const { sim, shape } = wallWorld(Mat.Brick);
     const ctx = ctxFor(sim, 'sledge');
@@ -58,6 +70,7 @@ describe('кувалда', () => {
       ctx.inventory.tick(1);
     }
     expect(shape.solidVoxels).toBe(4 * 30 * 40);
+    expect(shape.damage.some(d => d > 0)).toBe(true);
   });
 
   it('в пустоту не бьёт', () => {

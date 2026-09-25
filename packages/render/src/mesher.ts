@@ -39,6 +39,7 @@ export interface MeshSource {
   readonly sz: number;
   readonly voxelSize: number;
   readonly data: Uint8Array;
+  readonly damage?: Uint16Array;
   /** Слой краски: индекс вокселя → номер цвета. */
   readonly paint: ReadonlyMap<number, number>;
   idx(x: number, y: number, z: number): number;
@@ -186,8 +187,12 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
   const colorOf = (x: number, y: number, z: number, mat: number, ao: number): number[] => {
     const i = shape.idx(x, y, z);
     const painted = shape.paint.get(i);
-    const base = painted !== undefined ? (paint[painted % paint.length] ?? paint[0]) : MATERIALS[mat].color;
-    const shade = 1 - aoStrength * (1 - ao / 3);
+    const base = painted !== undefined
+      ? (painted >= 0x1000000 ? [(painted >> 16) & 255, (painted >> 8) & 255, painted & 255] : (paint[painted % paint.length] ?? paint[0]))
+      : MATERIALS[mat].color;
+    const wear = (mat === Mat.Metal || mat === Mat.Plastic)
+      ? Math.min(1, (shape.damage?.[i] ?? 0) / MATERIALS[mat].hp) : 0;
+    const shade = (1 - aoStrength * (1 - ao / 3)) * (1 - wear * 0.25);
     rgb[0] = (base[0] / 255) * shade;
     rgb[1] = (base[1] / 255) * shade;
     rgb[2] = (base[2] / 255) * shade;
@@ -207,6 +212,7 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
     const maskMat = new Int32Array(hu * hv);
     const maskAo = new Int32Array(hu * hv);
     const maskSky = new Int32Array(hu * hv);
+    const maskDent = new Float32Array(hu * hv);
     const maskCol = new Float32Array(hu * hv * 3);
 
     for (const dir of [-1, 1] as const) {
@@ -235,6 +241,8 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
             const ao = cornerAo(pos, d, u, v, dir, solidForAo);
             const cell = j * hu + i;
             maskMat[cell] = mat;
+            maskDent[cell] = (mat === Mat.Metal || mat === Mat.Plastic)
+              ? Math.min(1, (shape.damage?.[shape.idx(pos[0], pos[1], pos[2])] ?? 0) / MATERIALS[mat].hp) : 0;
             maskAo[cell] = ao.key;
             // Свет берём из воздуха перед гранью: внутри камня его нет.
             maskSky[cell] = sky ? sky.at(off[0], off[1], off[2]) : SKY_MAX;
@@ -261,6 +269,7 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
             while (
               i + wRun < hu &&
               maskMat[cell + wRun] === mat &&
+              maskDent[cell] === 0 && maskDent[cell + wRun] === 0 &&
               maskAo[cell + wRun] === aoKey &&
               maskSky[cell + wRun] === skyKey &&
               sameColor(maskCol, cell, cell + wRun)
@@ -274,6 +283,7 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
                 const c2 = (j + hRun) * hu + i + k;
                 if (
                   maskMat[c2] !== mat ||
+                  maskDent[cell] !== 0 || maskDent[c2] !== 0 ||
                   maskAo[c2] !== aoKey ||
                   maskSky[c2] !== skyKey ||
                   !sameColor(maskCol, cell, c2)
@@ -308,6 +318,7 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
               maskCol[cell * 3 + 2],
               mat,
               skyKey / SKY_MAX,
+              maskDent[cell],
             );
             quads++;
 
@@ -426,6 +437,7 @@ function emitQuad(
   b: number,
   mat: number,
   sky: number,
+  dent: number,
 ): void {
   const base = positions.length / 3;
   // Грань лежит на плоскости slice (для dir=-1) или slice+1 (для dir=+1).
@@ -455,7 +467,21 @@ function emitQuad(
     props.push(def.metalness, def.roughness, def.emissive);
     light.push(sky);
   }
-  indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  if (dent > 0) {
+    // Центр грани вдавлен, граница остаётся на месте: никаких щелей
+    // между повреждённой клеткой и соседними неповреждёнными гранями.
+    const center = [0, 0, 0];
+    for (const c of quad) for (let axis = 0; axis < 3; axis++) center[axis] += c[axis] / 4;
+    center[d] -= dir * s * dent * (mat === Mat.Plastic ? 0.45 : 0.25);
+    positions.push(...center);
+    normals.push(...n);
+    colors.push(r * 0.85, g * 0.85, b * 0.85);
+    props.push(def.metalness, def.roughness, def.emissive);
+    light.push(sky);
+    for (let k = 0; k < 4; k++) indices.push(base + k, base + (k + 1) % 4, base + 4);
+  } else {
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
 }
 
 /** Суммарная площадь видимых граней — для тестов на герметичность меша. */

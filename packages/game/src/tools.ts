@@ -63,7 +63,7 @@ export const TOOLS: Record<ToolId, ToolDef> = {
     slot: 1,
     ignites: false,
     falloff: 'linear',
-    description: 'Базовый снос. Кирпич, дерево, бетон — да. Сталь — нет.',
+    description: 'Базовый снос кирпича и дерева. Бетон и сталь не пробивает.',
     tiers: [
       { power: 0.35, radius: 0.22, range: 2.0, damage: 60, capacity: INF, cooldown: 0.45 },
       { power: 0.42, radius: 0.28, range: 2.2, damage: 85, capacity: INF, cooldown: 0.4 },
@@ -136,7 +136,7 @@ export const TOOLS: Record<ToolId, ToolDef> = {
       { power: 0.45, radius: 0.3, range: 9, damage: 90, capacity: 24, cooldown: 0.8 },
       { power: 0.5, radius: 0.34, range: 12, damage: 130, capacity: 36, cooldown: 0.7 },
       { power: 0.56, radius: 0.38, range: 16, damage: 180, capacity: 48, cooldown: 0.6 },
-      { power: 0.62, radius: 0.44, range: 20, damage: 240, capacity: 64, cooldown: 0.5 },
+      { power: 0.59, radius: 0.44, range: 20, damage: 240, capacity: 64, cooldown: 0.5 },
     ],
     upgradeCosts: [1500, 3500, 7000],
   },
