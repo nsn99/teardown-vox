@@ -112,6 +112,7 @@ export class AudioDirector {
   private rng: () => number;
   private time = 0;
   private burning = 0;
+  private burningCount: (() => number) | null = null;
   private _muted = false;
   private detach: Array<() => void> = [];
 
@@ -137,7 +138,9 @@ export class AudioDirector {
   }
 
   /** Подписаться на события мира. Возвращает отписку. */
-  listen(world: VoxelWorld): () => void {
+  listen(world: VoxelWorld, burningCount?: () => number): () => void {
+    this.burning = 0;
+    this.burningCount = burningCount ?? null;
     const off: Array<() => void> = [];
 
     off.push(
@@ -202,6 +205,9 @@ export class AudioDirector {
     for (const f of this.detach) f();
     this.detach.length = 0;
     this.queue.length = 0;
+    this.burning = 0;
+    this.burningCount = null;
+    this.lastPlayed.clear();
   }
 
   /** Ручной звук — интерфейс, подбор цели, всплеск. */
@@ -250,10 +256,11 @@ export class AudioDirector {
       });
     }
 
-    if (this.burning > 0) {
+    const burning = this.burningCount?.() ?? this.burning;
+    if (burning > 0) {
       out.push({
         id: 'fire',
-        gain: clamp01(0.15 + Math.log10(1 + this.burning) * 0.25),
+        gain: clamp01(0.15 + Math.log10(1 + burning) * 0.25),
         pitch: 1,
         at: null,
         loop: true,

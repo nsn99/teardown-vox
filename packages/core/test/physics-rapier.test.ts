@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   Body,
   Mat,
@@ -17,6 +17,24 @@ import { VS, staticBody } from './helpers.js';
  * по-настоящему, а не «на глаз в браузере».
  */
 describe('Rapier как физический бэкенд', () => {
+  it('пожар не ставит одну форму в очередь повторно между порциями пересборки', async () => {
+    const world = new VoxelWorld();
+    const shape = new VoxelShape({ sx: 96, sy: 4, sz: 4, voxelSize: 0.1 });
+    shape.fill({}, Mat.Wood);
+    const body = new Body({ kind: 'static', shapes: [shape] });
+    world.addBody(body);
+    const physics = await RapierPhysics.create(world, { rebuildBudget: 1 });
+    physics.step(1 / 60);
+    for (const x of [2, 34, 66]) shape.set(x, 2, 2, Mat.Air);
+    body.collidersDirty = true;
+    const bounds = vi.spyOn(shape, 'chunkBounds');
+    try {
+      for (let i = 0; i < 8; i++) physics.step(1 / 60);
+      expect(shape.dirtyColliderChunks.size).toBe(0);
+      // Ровно три изменённых чанка; чистая форма больше не пересобирается.
+      expect(bounds).toHaveBeenCalledTimes(3);
+    } finally { bounds.mockRestore(); physics.dispose(); }
+  });
   let available = true;
 
   beforeAll(async () => {

@@ -117,6 +117,7 @@ function saveProfile(): void {
 // ---------------------------------------------------------------------------
 
 function startRun(inSandbox: boolean): void {
+  player.suspend();
   sandbox = inSandbox;
   heist?.sim.dispose();
   particles.clear();
@@ -133,7 +134,8 @@ function startRun(inSandbox: boolean): void {
   physicsReady = upgradeToRapier(heist);
 
   audioOff?.();
-  audioOff = audio.listen(heist.sim.world);
+  audio.dispose();
+  audioOff = audio.listen(heist.sim.world, () => heist?.sim.fire.burningCount ?? 0);
   player.resume();
 
   menu.hide();
@@ -152,6 +154,7 @@ function startRun(inSandbox: boolean): void {
 
 function toHub(): void {
   paused = true;
+  player.suspend();
   hud.hide();
   input.releaseLock();
   menu.render(profile, level.brief);
@@ -199,6 +202,7 @@ function wireEvents(h: Heist): void {
 
   h.events.on('heist:finished', (r) => {
     paused = true;
+    player.suspend();
     input.releaseLock();
     saveProfile();
     const record = profile.record(r.missionId);
@@ -298,10 +302,8 @@ function handleActions(h: Heist): void {
   if (input.take('KeyR')) startRun(sandbox);
 
   if (input.take('Escape')) {
-    input.releaseLock();
-    paused = true;
-    menu.render(profile, level.brief);
-    menu.show();
+    toHub();
+    return;
   }
 
   if (input.state.firing) {
@@ -363,11 +365,19 @@ function frame(now: number): void {
     h.yaw += look.yaw;
     h.pitch = clamp(h.pitch + look.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
     handleActions(h);
+    if (paused) return;
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT);
   } else {
     input.clearPressed();
   }
+
+  if (paused) {
+    player.suspend();
+    return;
+  }
+  // Захват мыши асинхронный: ожидание не должно закрывать новый звук.
+  if (!captureMode && !input.locked) return;
 
   particles.step(dt);
   fireLights.update(h.sim.fire.burningPoints(), h.sim.world.time);
@@ -596,15 +606,13 @@ enableLevelDrop(window, {
 
 canvas.addEventListener('click', () => {
   // Браузер пускает звук только после жеста — клик по канвасу и есть жест.
-  player.resume();
+  if (!paused) player.resume();
   if (!paused && !input.locked) input.requestLock();
 });
 
 document.addEventListener('pointerlockchange', () => {
   if (!input.locked && !paused && !menu.visible && !result.visible) {
-    paused = true;
-    menu.render(profile, level.brief);
-    menu.show();
+    toHub();
   }
 });
 

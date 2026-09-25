@@ -147,7 +147,7 @@ export function useTool(ctx: ToolContext): ToolUseResult {
     case 'extinguisher': {
       inv.consume(id);
       const point = hit ? hit.point : add(ctx.origin, scale(dir, stats.range));
-      const doused = ctx.sim.fire.extinguish(world, point, stats.radius, stats.power);
+      const doused = ctx.sim.fire.extinguishAlong(world, ctx.origin, point, stats.radius, stats.power);
       return { used: true, tool: id, doused, point };
     }
 
