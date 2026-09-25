@@ -123,7 +123,7 @@ function startRun(inSandbox: boolean): void {
   particles.clear();
   chargeView.update([]);
 
-  heist = new Heist({ level, profile, sandbox: inSandbox });
+  heist = new Heist({ level, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
   heist.start();
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
@@ -188,7 +188,10 @@ function wireEvents(h: Heist): void {
     particles.emitSparks(e.point, 6);
   });
 
-  h.sim.world.events.on('fire:ignited', (e) => particles.emitFire(e.point, 1));
+  h.sim.world.events.on('fire:ignited', (e) => {
+    const limit = { low: 256, medium: 768, high: 1536 }[renderer.currentQuality];
+    if (particles.count < limit) particles.emitFire(e.point, 1);
+  });
 
   h.mission.events.on('alarm:started', () =>
     hud.message(`Тревога. ${Math.round(h.mission.config.alarmSeconds)} секунд`, 3),
@@ -380,9 +383,11 @@ function frame(now: number): void {
   if (!captureMode && !input.locked) return;
 
   particles.step(dt);
-  fireLights.update(h.sim.fire.burningPoints(), h.sim.world.time);
-  for (const p of h.sim.fire.burningPoints()) {
-    if (!captureMode && Math.random() < 0.06) particles.emitFire(p.position, p.heat);
+  const firePointLimit = { low: 48, medium: 128, high: 256 }[renderer.currentQuality];
+  const firePoints = [...h.sim.fire.burningPoints(firePointLimit)];
+  fireLights.update(firePoints, h.sim.world.time);
+  for (const p of firePoints) {
+    if (!captureMode && Math.random() < dt * 3.6) particles.emitFire(p.position, p.heat);
   }
 
   // Слушатель — там же, где камера: звук должен приходить оттуда, куда

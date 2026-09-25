@@ -311,6 +311,7 @@ export class VoxelRenderer {
       const pool = this.pool;
       this.queue = new RemeshQueue<ChunkSlice>({
         slots: pool.depth,
+        acceptSuperseded: true,
         send: (key, token, slice) => pool.mesh(key, token, slice, this.aoStrength),
       });
       this.stats.workers = pool.slots;
@@ -961,10 +962,9 @@ export class VoxelRenderer {
   /**
    * Готовый меш из воркера.
    *
-   * Устаревший ответ — обычное дело: пока чанк мешился, по стене успели
-   * ударить ещё раз. Такой результат выбрасывается целиком, а не
-   * «подмешивается»: геометрия чанка либо соответствует вокселям, либо
-   * нет, среднего состояния у неё не бывает.
+   * Во время пожара изменения приходят непрерывно. Готовый промежуточный
+   * меш показываем сразу, сохраняя заявку на свежий. Иначе отверстия
+   * становятся видны только после тушения. Отменённые формы не принимаем.
    */
   private applyResult(r: RemeshResult): void {
     if (this.queue?.accept(r.key, r.token)) {
@@ -972,8 +972,9 @@ export class VoxelRenderer {
       if (entry) {
         applyMesh(entry.opaque, r.opaque);
         applyMesh(entry.glass, r.transparent);
-        entry.dirty = false;
-        entry.queued = false;
+        // При пожаре показываем уже готовое разрушение, не ждём конца огня.
+        entry.dirty = this.queue.hasPending(r.key);
+        entry.queued = entry.dirty;
         this.landed++;
       }
     }

@@ -85,10 +85,15 @@ export class FireSystem {
   }
 
   /** Горящие воксели в мировых координатах — для частиц и света. */
-  *burningPoints(): Generator<{ position: Vec3; heat: number }> {
+  *burningPoints(limit = Infinity): Generator<{ position: Vec3; heat: number }> {
+    if (limit <= 0) return;
+    // Равномерная выборка по всем очагам, а не только начало первого пожара.
+    const stride = Math.max(1, Math.ceil(this.burningTotal / limit));
+    let visited = 0;
     const c = { x: 0, y: 0, z: 0 };
     for (const sf of this.shapes.values()) {
       for (const cell of sf.cells.values()) {
+        if (visited++ % stride !== 0) continue;
         sf.shape.coords(cell.index, c);
         yield {
           position: sf.shape.voxelCenterWorld(c.x, c.y, c.z, sf.body.transform),
