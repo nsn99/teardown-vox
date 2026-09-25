@@ -27,7 +27,7 @@ import {
   stepStructure,
   v3,
 } from '@tvox/core';
-import { ChargeView, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { ChargeView, ExtinguisherJet, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -38,8 +38,10 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const renderer = new VoxelRenderer({ canvas, quality: 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
+const extinguisherJet = new ExtinguisherJet();
+let extinguisherHitUntil = 0;
 const chargeView = new ChargeView();
-renderer.scene.add(particles.points, fireLights.group, chargeView.group);
+renderer.scene.add(particles.points, fireLights.group, chargeView.group, extinguisherJet.mesh);
 const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
@@ -121,6 +123,8 @@ function startRun(inSandbox: boolean): void {
   sandbox = inSandbox;
   heist?.sim.dispose();
   particles.clear();
+  extinguisherJet.clear();
+  extinguisherHitUntil = 0;
   chargeView.update([]);
 
   heist = new Heist({ level, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
@@ -154,6 +158,7 @@ function startRun(inSandbox: boolean): void {
 
 function toHub(): void {
   paused = true;
+  extinguisherJet.clear();
   player.suspend();
   hud.hide();
   input.releaseLock();
@@ -312,6 +317,18 @@ function handleActions(h: Heist): void {
   if (input.state.firing) {
     const res = h.use();
     if (res.used) {
+      if (res.tool === 'extinguisher' && res.point) {
+        extinguisherJet.show(h.eye, res.point);
+        if ((res.doused ?? 0) > 0) extinguisherHitUntil = performance.now() + 800;
+        const range = h.inventory.activeStats.range;
+        hud.message(
+          h.sim.fire.burningCount === 0 ? 'Огня не осталось' :
+          performance.now() < extinguisherHitUntil ? 'Тушение действует — ведите струю по огню' :
+          res.sprayHitSurface ? 'Пена попадает на поверхность. Цельтесь в основание огня' :
+          `Струя не достаёт до поверхности. Подойдите ближе: дальность ${range} м`,
+          1.2,
+        );
+      }
       if (res.point && (res.removed ?? 0) > 0) {
         particles.emitSparks(res.point, h.inventory.active === 'blowtorch' ? 10 : 4);
       }
@@ -383,6 +400,8 @@ function frame(now: number): void {
   if (!captureMode && !input.locked) return;
 
   particles.step(dt);
+  extinguisherJet.step(dt);
+  if (h.inventory.active !== 'extinguisher') extinguisherJet.clear();
   const firePointLimit = { low: 48, medium: 128, high: 256 }[renderer.currentQuality];
   const firePoints = [...h.sim.fire.burningPoints(firePointLimit)];
   fireLights.update(firePoints, h.sim.world.time);

@@ -306,3 +306,48 @@ export class FireLights {
     }
   }
 }
+
+/** Одна переиспользуемая струя: видна дальность и точка попадания пены. */
+export class ExtinguisherJet {
+  readonly mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.025, 1, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xe4faff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  private remaining = 0;
+  private axis = new THREE.Vector3(0, 1, 0);
+  private direction = new THREE.Vector3();
+  private start = new THREE.Vector3();
+  private end = new THREE.Vector3();
+
+  constructor() {
+    this.mesh.name = 'extinguisher-jet';
+    this.mesh.visible = false;
+  }
+
+  show(origin: Vec3, point: Vec3): void {
+    this.end.set(point.x, point.y, point.z);
+    this.start.set(origin.x, origin.y, origin.z);
+    this.direction.subVectors(this.end, this.start).normalize();
+    // Сопло чуть ниже глаз, чтобы струя читалась в перспективе.
+    this.start.addScaledVector(this.direction, 0.25);
+    this.start.y -= 0.18;
+    this.direction.subVectors(this.end, this.start);
+    const length = this.direction.length();
+    if (length < 0.01) { this.clear(); return; }
+    this.mesh.position.copy(this.start).add(this.end).multiplyScalar(0.5);
+    this.mesh.quaternion.setFromUnitVectors(this.axis, this.direction.normalize());
+    this.mesh.scale.set(1, length, 1);
+    this.mesh.visible = true;
+    this.remaining = 0.12;
+  }
+
+  step(dt: number): void {
+    this.remaining -= dt;
+    if (this.remaining <= 0) this.clear();
+  }
+
+  clear(): void {
+    this.remaining = 0;
+    this.mesh.visible = false;
+  }
+}

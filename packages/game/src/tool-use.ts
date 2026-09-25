@@ -57,6 +57,8 @@ export interface ToolUseResult {
   painted?: number;
   ignited?: number;
   doused?: number;
+  /** Струя достигла поверхности в пределах дальности инструмента. */
+  sprayHitSurface?: boolean;
   /** Куда пришёлся эффект. */
   point?: Vec3;
   spawned?: Body;
@@ -148,7 +150,7 @@ export function useTool(ctx: ToolContext): ToolUseResult {
       inv.consume(id);
       const point = hit ? hit.point : add(ctx.origin, scale(dir, stats.range));
       const doused = ctx.sim.fire.extinguishAlong(world, ctx.origin, point, stats.radius, stats.power);
-      return { used: true, tool: id, doused, point };
+      return { used: true, tool: id, doused, point, sprayHitSurface: !!hit };
     }
 
     case 'spraycan': {
