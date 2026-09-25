@@ -182,6 +182,10 @@ export class RapierPhysics implements PhysicsBackend {
     };
     this.entries.set(body.id, entry);
     this.buildColliders(entry);
+    if (body.kind === 'dynamic' && !body.kinematic) {
+      rb.setLinvel(body.velocity, true);
+      rb.setAngvel(body.angularVelocity, true);
+    }
     body.physicsHandle = rb.handle;
     body.collidersDirty = false;
   }
@@ -305,7 +309,7 @@ export class RapierPhysics implements PhysicsBackend {
   applyRadialImpulse(center: Vec3, radius: number, strength: number): void {
     for (const entry of this.entries.values()) {
       if (entry.body.kind !== 'dynamic' || entry.body.kinematic) continue;
-      const t = entry.rb.translation();
+      const t = entry.rb.worldCom();
       const p = v3(t.x, t.y, t.z);
       const d = distance(p, center);
       if (d > radius) continue;

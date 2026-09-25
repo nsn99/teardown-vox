@@ -1,16 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { Mat, Simulation } from '@tvox/core';
+import { meshShape, meshSlice, sliceChunk } from '@tvox/render';
 import {
   VoxFormatError,
   buildVolume,
   levelFromDoc,
   readVox,
+  parseLevelDoc,
   voxCount,
   voxMaterialTable,
   voxSandboxDoc,
   voxToShape,
   voxToVolume,
 } from '@tvox/game';
+
+it('RGBA сохраняется при загрузке уровня и мешировании в воркере', () => {
+  const file = readVox(makeVox([{size: [2, 1, 1], voxels: [[0, 0, 0, 1], [1, 0, 0, 2]]}], [[255, 0, 0, 255], [0, 255, 0, 255]]));
+  const doc = parseLevelDoc(JSON.parse(JSON.stringify(voxSandboxDoc(file))));
+  const shape = buildVolume(doc.volumes[1], 0.1);
+  expect([...shape.paint.values()]).toEqual([0x1ff0000, 0x100ff00]);
+  const direct = meshShape(shape, {aoStrength: 0});
+  const worker = meshSlice(sliceChunk(shape, shape.chunkBounds(0), undefined), 0).opaque;
+  expect([...worker.colors]).toEqual([...direct.colors]);
+  expect([...direct.colors]).toContain(1);
+  const spawn = voxSandboxDoc(file).spawn;
+  expect(-Math.sin(spawn.yaw)).toBeGreaterThan(0);
+  expect(-Math.cos(spawn.yaw)).toBeGreaterThan(0);
+});
 
 /**
  * Импорт .vox.

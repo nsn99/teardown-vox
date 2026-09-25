@@ -30,17 +30,18 @@ function blast(
   sim: Simulation,
   center: { x: number; y: number; z: number },
   radius: number,
+  power = 1,
 ): number {
   return carve(
     sim.world,
     { kind: 'sphere', center, radius },
-    { power: 1, damage: 0, instant: true, falloff: 'quadratic', cause: 'test' },
+    { power, damage: 0, instant: true, falloff: 'quadratic', cause: 'test' },
   ).removed;
 }
 
 /** Прогон сценария и слепок итога, по которому сверяются два режима. */
 function run(
-  hits: Array<{ x: number; y: number; z: number; r: number }>,
+  hits: Array<{ x: number; y: number; z: number; r: number; power?: number }>,
   opts: StructureOptions,
 ): {
   fragments: number;
@@ -61,7 +62,7 @@ function run(
   let carved = 0;
   let passes = 0;
   for (const h of hits) {
-    carved += blast(sim, { x: h.x, y: h.y, z: h.z }, h.r);
+    carved += blast(sim, { x: h.x, y: h.y, z: h.z }, h.r, h.power);
     // Крутим до затухания, а не фиксированное число проходов: частичный
     // режим намеренно размазывает работу по кадрам, и сравнивать надо
     // то, чем всё кончилось, а не сколько успелось к четвёртому проходу.
@@ -83,7 +84,7 @@ function run(
 
 // Координаты — мировые, по фактической геометрии «Порта»: склад стоит на
 // (6,0,14) и занимает 20×8×16 м, офис — на (30,0,14), кран — на (28,0,4).
-const SCENARIOS: Array<{ name: string; hits: Array<{ x: number; y: number; z: number; r: number }> }> = [
+const SCENARIOS: Array<{ name: string; hits: Array<{ x: number; y: number; z: number; r: number; power?: number }> }> = [
   { name: 'дыра в стене склада', hits: [{ x: 12, y: 2, z: 14.1, r: 0.9 }] },
   {
     name: 'подрезанная колонна',
@@ -102,7 +103,7 @@ const SCENARIOS: Array<{ name: string; hits: Array<{ x: number; y: number; z: nu
   },
   // Башня крана полая, а тяжёлая сталь берётся только у самого центра
   // заряда — отсюда и точка, и радиус.
-  { name: 'удар в кран', hits: [{ x: 29.2, y: 5, z: 7, r: 0.8 }] },
+  { name: 'удар в кран', hits: [{ x: 29.2, y: 5, z: 7, r: 0.8, power: 1.5 }] },
   {
     name: 'подрез склада изнутри',
     hits: [

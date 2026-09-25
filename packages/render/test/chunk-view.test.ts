@@ -40,6 +40,19 @@ function chunksOf(s: VoxelShape): number[] {
 }
 
 describe('вырезанный кусок формы', () => {
+  it('вмятины металла и деформация пластика сохраняются в воркере', () => {
+    const s = new VoxelShape({sx: 4, sy: 4, sz: 1, voxelSize: 0.1});
+    s.fill({}, Mat.Metal);
+    s.set(2, 2, 0, Mat.Plastic);
+    s.damage[s.idx(1, 1, 0)] = 100;
+    s.damage[s.idx(2, 2, 0)] = 15;
+    const direct = meshShape(s);
+    const worker = meshSlice(sliceChunk(s, s.chunkBounds(0), undefined), 0.35).opaque;
+    expect([...worker.positions]).toEqual([...direct.positions]);
+    expect([...worker.colors]).toEqual([...direct.colors]);
+    expect([...direct.positions].some(n => n > 0 && n < 0.02)).toBe(true);
+    expect(s.solidVoxels).toBe(16);
+  });
   const shape = warehouse();
   const sky = new SkyLight(shape);
   sky.bake();

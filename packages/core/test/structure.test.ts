@@ -32,6 +32,35 @@ function worldOf(s: VoxelShape): { world: VoxelWorld; body: Body } {
 }
 
 describe('якоря и связность', () => {
+  it('перерезанный падающий обломок распадается, связный не пересоздаётся', () => {
+    const s = shape(12, 2, 2); s.fill({}, Mat.Wood);
+    const world = new VoxelWorld();
+    const body = new Body({kind: 'dynamic', shapes: [s], tags: ['debris']});
+    body.velocity = v3(1, -3, 2);
+    world.addBody(body);
+    expect(stepStructure(world).fragments).toHaveLength(0);
+    s.fill({x0: 5, x1: 6}, Mat.Air);
+    const before = world.totalSolidVoxels();
+    const result = stepStructure(world);
+    expect(result.fragments).toHaveLength(1);
+    expect(result.fragments[0].body.velocity).toEqual(v3(1, -3, 2));
+    expect(world.totalSolidVoxels()).toBe(before);
+    expect(world.bodies.size).toBe(2);
+    expect(stepStructure(world).fragments).toHaveLength(0);
+  });
+  it.each([Mat.Dirt, Mat.HeavyMetal, Mat.Rock])('материал %i не удерживает отрезанный блок в воздухе', (mat) => {
+    const s = withFoundation(shape(5, 8, 5));
+    s.fill({ x0: 1, x1: 4, y0: 5, y1: 7, z0: 1, z1: 4 }, mat);
+    expect(findLooseComponents(s, computeAnchored(s))).toHaveLength(1);
+  });
+  it('оторванная листва исчезает без твёрдого обломка', () => {
+    const s = withFoundation(shape(5, 8, 5));
+    s.fill({x0: 1, x1: 4, y0: 5, y1: 7, z0: 1, z1: 4}, Mat.Foliage);
+    const {world} = worldOf(s);
+    const result = stepStructure(world, {stress: false});
+    expect(result.dustVoxels).toBe(18);
+    expect(result.fragments).toHaveLength(0);
+  });
   it('фундамент — якорь, воздух — нет', () => {
     const s = shape(3, 3, 3);
     s.set(1, 1, 1, Mat.Foundation);

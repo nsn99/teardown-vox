@@ -516,6 +516,7 @@ export class VoxelShape {
       grounded: this.grounded,
       name: this.name,
       rle: encodeRle(this.data),
+      paint: [...this.paint],
     };
   }
 
@@ -530,6 +531,7 @@ export class VoxelShape {
       name: json.name,
     });
     decodeRle(json.rle, s.data);
+    for (const [index, color] of json.paint ?? []) s.paint.set(index, color);
     s.recountSolid();
     return s;
   }
@@ -545,6 +547,8 @@ export interface SerializedShape {
   name: string;
   /** [материал, длина, материал, длина, ...] */
   rle: number[];
+  /** Индексы цветов баллончика либо 0x1000000 + RGB импортированной модели. */
+  paint?: [number, number][];
 }
 
 /** RLE — воксельные карты почти всегда состоят из длинных однородных пробегов. */

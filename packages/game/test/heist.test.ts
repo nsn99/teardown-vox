@@ -226,8 +226,10 @@ describe('прохождение ограбления', () => {
     const h = startedHeist();
     const level = [...h.sim.world.bodies.values()].find((b) => b.tags.has('level'))!;
     const before = level.solidVoxels;
-    // Смотрим в пол под ногами.
-    h.pitch = -Math.PI / 2;
+    // Кирпичная стена: бетонный пол кувалда намеренно не берёт.
+    h.character.teleport(v3(12, 0.05, 15.2));
+    h.yaw = 0;
+    h.pitch = 0;
     h.inventory.select('sledge');
     let removed = 0;
     for (let i = 0; i < 10; i++) {
@@ -304,7 +306,9 @@ describe('прохождение ограбления', () => {
 
   it('рестарт возвращает уровень в исходное состояние', () => {
     const h = startedHeist();
-    h.pitch = -Math.PI / 2;
+    h.character.teleport(v3(12, 0.05, 15.2));
+    h.yaw = 0;
+    h.pitch = 0;
     for (let i = 0; i < 5; i++) {
       h.use();
       h.inventory.tick(1);

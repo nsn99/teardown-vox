@@ -1,0 +1,189 @@
+{
+  "fps": 10,
+  "recorded": "2026-09-25T14:47:36.097Z",
+  "clips": [
+    {
+      "file": "материал-rock",
+      "mat": "rock",
+      "tool": "explosive",
+      "title": "камень",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "материал-dirt",
+      "mat": "dirt",
+      "tool": "sledge",
+      "title": "земля",
+      "start": 1296,
+      "end": 155,
+      "frames": 40
+    },
+    {
+      "file": "материал-concrete",
+      "mat": "concrete",
+      "tool": "explosive",
+      "title": "бетон",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "материал-brick",
+      "mat": "brick",
+      "tool": "sledge",
+      "title": "кирпич",
+      "start": 1296,
+      "end": 262,
+      "frames": 40
+    },
+    {
+      "file": "материал-plank",
+      "mat": "plank",
+      "tool": "shotgun",
+      "title": "доска",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "материал-wood",
+      "mat": "wood",
+      "tool": "sledge",
+      "title": "дерево",
+      "start": 1296,
+      "end": 215,
+      "frames": 40
+    },
+    {
+      "file": "материал-metal",
+      "mat": "metal",
+      "tool": "blowtorch",
+      "title": "металл",
+      "start": 1296,
+      "end": 1213,
+      "frames": 40
+    },
+    {
+      "file": "материал-heavy_metal",
+      "mat": "heavy_metal",
+      "tool": "explosive",
+      "title": "тяжёлый металл",
+      "start": 1296,
+      "end": 1003,
+      "frames": 40
+    },
+    {
+      "file": "материал-glass",
+      "mat": "glass",
+      "tool": "shotgun",
+      "title": "стекло",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "материал-plastic",
+      "mat": "plastic",
+      "tool": "sledge",
+      "title": "пластик",
+      "start": 1296,
+      "end": 235,
+      "frames": 40
+    },
+    {
+      "file": "материал-foliage",
+      "mat": "foliage",
+      "tool": "sledge",
+      "title": "листва",
+      "start": 1296,
+      "end": 147,
+      "frames": 40
+    },
+    {
+      "file": "материал-cable",
+      "mat": "cable",
+      "tool": "sledge",
+      "title": "кабель",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-sledge",
+      "mat": "brick",
+      "tool": "sledge",
+      "title": "sledge",
+      "start": 1296,
+      "end": 262,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-shotgun",
+      "mat": "brick",
+      "tool": "shotgun",
+      "title": "shotgun",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-explosive",
+      "mat": "brick",
+      "tool": "explosive",
+      "title": "explosive",
+      "start": 1296,
+      "end": 144,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-blowtorch",
+      "mat": "brick",
+      "tool": "blowtorch",
+      "title": "blowtorch",
+      "start": 1296,
+      "end": 873,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-spraycan",
+      "mat": "brick",
+      "tool": "spraycan",
+      "title": "spraycan",
+      "start": 1296,
+      "end": 1296,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-extinguisher",
+      "mat": "wood",
+      "tool": "extinguisher",
+      "title": "extinguisher",
+      "start": 1296,
+      "end": 1296,
+      "frames": 40
+    },
+    {
+      "file": "инструмент-planks",
+      "mat": "brick",
+      "tool": "planks",
+      "title": "planks",
+      "start": 1296,
+      "end": 1296,
+      "frames": 40
+    },
+    {
+      "file": "обрушение-склада",
+      "frames": 90,
+      "detached": 215405,
+      "fragments": 11,
+      "quality": "low"
+    }
+  ],
+  "source_commits": [
+    "9abd71c",
+    "236cbd9"
+  ],
+  "manual_check_complete": false
+}

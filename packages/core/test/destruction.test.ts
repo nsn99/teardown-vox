@@ -17,6 +17,23 @@ const TOOL = {
 } as const;
 
 describe('carve: модель «сила против прочности»', () => {
+  it('стекло рассыпается связанным листом, соседний лист остаётся целым', () => {
+    const s = makeShape(12, 12, 3);
+    s.fill({x1: 5, z1: 1}, Mat.Glass);
+    s.fill({x0: 7, z1: 1}, Mat.Glass);
+    const { world } = worldWith(s);
+    const hit = carve(world, {kind: 'sphere', center: voxelCenter(2, 6, 0), radius: 0.1}, {power: 0.35, damage: 1});
+    expect(hit.removed).toBe(60);
+    expect(s.solidVoxels).toBe(60);
+    expect(s.get(9, 6, 0)).toBe(Mat.Glass);
+  });
+  it('листва исчезает от касания и не создаёт твёрдых частиц', () => {
+    const s = makeShape(1, 1, 1); s.fill({}, Mat.Foliage);
+    const { world } = worldWith(s);
+    const hit = carve(world, {kind: 'sphere', center: voxelCenter(0, 0, 0), radius: 0.1}, {power: 0.35, damage: 1});
+    expect(hit.removed).toBe(1);
+    expect(hit.debris).toEqual([]);
+  });
   it('кувалда сносит дерево', () => {
     const s = makeShape(20, 20, 20);
     s.fill({}, Mat.Wood);

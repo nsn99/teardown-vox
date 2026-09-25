@@ -68,6 +68,13 @@ const fail = (tool: ToolId, reason: ToolFailure): ToolUseResult => ({
   reason,
 });
 
+/** Бетон вскрывают зарядом или техникой, сталь — горелкой или зарядом. */
+function toolProtection(ctx: ToolContext): ReadonlySet<number> {
+  const protectedMaterials = new Set(ctx.protect);
+  protectedMaterials.add(Mat.Concrete);
+  return protectedMaterials;
+}
+
 /**
  * Применение активного инструмента к миру.
  *
@@ -130,7 +137,7 @@ export function useTool(ctx: ToolContext): ToolUseResult {
           damage: stats.damage,
           falloff: 'linear',
           cause: 'shotgun',
-          protect: ctx.protect,
+          protect: toolProtection(ctx),
           ignoreBodies: ctx.ignoreBodies,
         },
       );
@@ -191,7 +198,7 @@ function sphereCarve(
       damage,
       falloff: 'linear',
       cause,
-      protect: ctx.protect,
+      protect: toolProtection(ctx),
       ignoreBodies: ctx.ignoreBodies,
     },
   );
@@ -216,7 +223,7 @@ function capsuleCarve(
       damage,
       falloff: 'none',
       cause: 'blowtorch',
-      protect: ctx.protect,
+      protect: toolProtection(ctx),
       ignoreBodies: ctx.ignoreBodies,
     },
   );
@@ -335,9 +342,11 @@ export class ChargeSystem {
       );
     }
 
+    // Сначала отделяем и регистрируем новые обломки в физике: иначе
+    // импульс успевает пройти до их появления и взрыв их не расталкивает.
+    sim.settle();
     sim.physics.applyRadialImpulse(c.position, c.radius * 2, this.impulse);
     sim.fire.igniteArea(sim.world, c.position, c.radius * 0.8, 1);
-    sim.settle();
     return true;
   }
 

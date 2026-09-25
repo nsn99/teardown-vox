@@ -136,7 +136,7 @@ async function api(path, { method = 'GET', body } = {}) {
 
 async function paged(path) {
   const out = [];
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; ; page++) {
     const sep = path.includes('?') ? '&' : '?';
     const chunk = await api(`${path}${sep}per_page=100&page=${page}`);
     if (!chunk || chunk.length === 0) break;
@@ -317,6 +317,8 @@ async function closeFinishedMilestones(milestoneMap) {
       method: 'PATCH',
       body: { state: 'closed' },
     });
+    const verified = await api(`/repos/${repo}/milestones/${number}`);
+    if (verified?.state !== 'closed') throw new Error(`GitHub не подтвердил закрытие вехи ${number}`);
     console.log(`  закрыта:       ${m.title}`);
   }
 }
