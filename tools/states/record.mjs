@@ -2,8 +2,9 @@
 /**
  * Съёмка состояний: цел → повреждён → разрушен.
  *
- * Ролик на каждый материал и на каждый инструмент плюс запись полного
- * обрушения склада. Нужны они не для красоты: разрушение — единственная
+ * Ролик на каждый материал и на каждый инструмент плюс запись отделения
+ * склада от опор. Полный снос проверяется отдельно по manual-check.md.
+ * Нужны они не для красоты: разрушение — единственная
  * часть игры, где «работает или нет» глазами видно сразу, а тестом почти
  * не описывается. Тест скажет, что снялось 812 вокселей; вопрос «а
  * выглядит ли это как проломленная кирпичная стена» тест не решает.
@@ -32,6 +33,8 @@ const argValue = (name, fallback) => {
 const outDir = resolve(root, argValue('--out', 'shots/states'));
 const only = argValue('--only', '');
 const skipCollapse = args.includes('--skip-collapse');
+const collapseQuality = argValue('--collapse-quality', 'medium');
+if (!['low', 'medium', 'high'].includes(collapseQuality)) throw new Error('Неизвестное качество обрушения');
 const PORT = 4323;
 const FPS = 10;
 
@@ -128,13 +131,14 @@ try {
   if (!skipCollapse && (!only || only === 'collapse')) {
     console.log('… обрушение-склада');
     await page.evaluate(() => window.tvox.captureStart(false));
-    await page.evaluate(() => {
+    await page.evaluate(quality => {
       const t = window.tvox;
+      t.renderer.setQuality(quality);
       t.look(36, 11, 40, 0, 0);
       const eye = t.heist.eye, dx = 16-eye.x, dy = 4-eye.y, dz = 22-eye.z;
       t.heist.yaw = Math.atan2(-dx,-dz); t.heist.pitch = Math.atan2(dy,Math.hypot(dx,dz));
       t.renderer.setDaylight('day');
-    });
+    }, collapseQuality);
     const tmp = join(outDir, '.frames', 'обрушение-склада');
     mkdirSync(tmp, {recursive: true});
     let detached = 0;
@@ -158,7 +162,7 @@ try {
     const fragments = await page.evaluate(() => [...window.tvox.heist.sim.world.bodies.values()].filter(b => b.kind === 'dynamic').length);
     if (detached === 0) throw new Error('Опоры удалены, но ничего не отделилось');
     encode('обрушение-склада', tmp, 90);
-    made.push({file:'обрушение-склада', frames:90, detached, fragments});
+    made.push({file:'обрушение-склада', frames:90, detached, fragments, quality: collapseQuality});
     console.log(`  ✓ отделено ${detached} вокселей`);
   }
   if (errors.length) throw new Error(errors.join('\n'));
