@@ -105,6 +105,10 @@ export class VoxelShape {
   readonly damage: Uint16Array;
   transform: Transform;
   grounded: boolean;
+  /** Крепления построенных во время игры форм к вокселям других тел. */
+  readonly attachments = new Map<number, { bodyId: number; shapeId: number; index: number }>();
+  /** Актуальные опоры; пересчитываются перед структурным проходом. */
+  readonly attachmentAnchors = new Set<number>();
   name: string;
 
   /**

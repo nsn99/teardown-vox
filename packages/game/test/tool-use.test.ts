@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Body, Mat, RapierPhysics, Simulation, VoxelShape, v3 } from '@tvox/core';
+import { Body, Mat, RapierPhysics, Simulation, VoxelShape, stepStructure, rotateVec, normalize, v3 } from '@tvox/core';
 import {
   ChargeSystem,
   Inventory,
@@ -304,6 +304,36 @@ describe('доски', () => {
     expect(builder.anchor).toBeNull();
   });
 
+  it('совпавшая вторая точка не создаёт обрезок и не расходует доску', () => {
+    const { sim } = wallWorld();
+    const ctx = ctxFor(sim, 'planks');
+    const builder = new PlankBuilder();
+    builder.click(ctx);
+    const ammo = ctx.inventory.ammo('planks'), bodies = sim.world.bodies.size;
+    expect(builder.click(ctx)).toMatchObject({ used: false, reason: 'too-close' });
+    expect(ctx.inventory.ammo('planks')).toBe(ammo);
+    expect(sim.world.bodies.size).toBe(bodies);
+    expect(builder.anchor).not.toBeNull();
+  });
+
+  it('доска держится на точках крепления и падает после разрушения обеих опор', () => {
+    const { sim, shape: wall } = wallWorld();
+    const ctx = ctxFor(sim, 'planks');
+    const builder = new PlankBuilder();
+    builder.click(ctx);
+    ctx.origin = v3(0, 2.2, 1);
+    const plank = builder.click(ctx).spawned!;
+    const volume = plank.solidVoxels;
+    for (let i = 0; i < 5; i++) stepStructure(sim.world, { timeBudgetMs: 0 });
+    expect(plank.destroyed).toBe(false);
+    expect(plank.solidVoxels).toBe(volume);
+    expect(plank.kind).toBe('static');
+    for (const link of plank.shapes[0].attachments.values()) wall.setAt(link.index, Mat.Air);
+    const result = stepStructure(sim.world, { timeBudgetMs: 0 });
+    expect(result.fragments.some(f => f.body.tags.has('debris'))).toBe(true);
+    expect(plank.solidVoxels).toBe(0);
+  });
+
   it('отмена сбрасывает точку', () => {
     const { sim } = wallWorld();
     const ctx = ctxFor(sim, 'planks');
@@ -332,6 +362,17 @@ describe('доски', () => {
   it('вырожденная доска не создаётся', () => {
     const sim = new Simulation();
     expect(buildPlank(sim.world, v3(0, 0, 0), v3(0, 0, 0.01))).toBeNull();
+  });
+
+  it('диагональный пандус направлен к цели и не наклонён поперёк', () => {
+    const direction = normalize(v3(-2.5, 2.6, -1));
+    const rotation = rotationFromXAxis(direction);
+    const along = rotateVec(rotation, v3(1, 0, 0));
+    expect(along.x).toBeCloseTo(direction.x);
+    expect(along.y).toBeCloseTo(direction.y);
+    expect(along.z).toBeCloseTo(direction.z);
+    expect(rotateVec(rotation, v3(0, 0, 1)).y).toBeCloseTo(0);
+    expect(rotateVec(rotation, v3(0, 1, 0)).y).toBeGreaterThan(0);
   });
 
   it('поворот вдоль оси X обрабатывает вырожденные случаи', () => {

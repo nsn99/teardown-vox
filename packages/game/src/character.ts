@@ -234,7 +234,11 @@ export class CharacterController {
     for (let lift = 0.1; lift <= step + 1e-6; lift += 0.1) {
       const raised = v3(target.x, this.position.y + lift, target.z);
       if (!overlapsSolid(world, this.aabbAt(raised))) {
+        // Прижимаемся к ступени: зависание после подъёма сбивало движение
+        // на диагональных пандусах, пока игрок снова не касался опоры.
+        const lowY = this.position.y;
         this.position = raised;
+        this.position.y = snapDown(world, this, raised.y, lowY);
         return true;
       }
     }

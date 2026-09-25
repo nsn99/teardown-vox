@@ -61,12 +61,14 @@ const DEFAULTS = {
 
 /**
  * Признак якоря: воксель либо сам из якорного материала (фундамент),
- * либо лежит в нижнем слое формы, помеченной как стоящая на земле.
+ * либо лежит в нижнем слое формы на земле, либо имеет проверенное
+ * крепление к вокселю другого неподвижного тела.
  */
 export function isAnchorVoxel(shape: VoxelShape, x: number, y: number, z: number): boolean {
-  const mat = shape.data[shape.idx(x, y, z)];
+  const index = shape.idx(x, y, z);
+  const mat = shape.data[index];
   if (mat === Mat.Air) return false;
-  if (material(mat).anchor) return true;
+  if (material(mat).anchor || (shape.attachmentAnchors.size > 0 && shape.attachmentAnchors.has(index))) return true;
   return shape.grounded && y === 0;
 }
 
@@ -1009,6 +1011,19 @@ export function stepStructure(
     // Для падающих обломков проверяем связность, но не статические нагрузки.
     // Техника управляет собственными узлами и в этот разбор не входит.
     if (body.kind !== 'static' && !body.tags.has('debris')) continue;
+    for (const shape of body.shapes) {
+      for (const [index, link] of shape.attachments) {
+        const support = world.bodies.get(link.bodyId);
+        const target = support?.shapes.find(s => s.id === link.shapeId);
+        const anchored = !!support && !support.destroyed && support.kind === 'static' &&
+          !!target && target.data[link.index] !== Mat.Air && shape.data[index] !== Mat.Air;
+        if (anchored === shape.attachmentAnchors.has(index)) continue;
+        if (anchored) shape.attachmentAnchors.add(index);
+        else shape.attachmentAnchors.delete(index);
+        const c = shape.coords(index);
+        shape.markDirty(c.x, c.y, c.z);
+      }
+    }
     const dirty = body.shapes.some((s) => s.structureDirty);
     if (!dirty) continue;
     // Кончилось время — остальные тела досчитаем в следующем проходе.

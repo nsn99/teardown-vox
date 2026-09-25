@@ -82,16 +82,27 @@ export class Input {
     this.on(window, 'blur', () => {
       this.down.clear();
       this.state.firing = false;
+      this.state.pressed.clear();
     });
 
     this.on(this.canvas, 'mousedown', (e) => {
       const ev = e as MouseEvent;
       if (!this.locked) return;
-      if (ev.button === 0) this.state.firing = true;
+      if (ev.button === 0) {
+        if (!this.state.firing) this.state.pressed.add('Mouse0');
+        this.state.firing = true;
+      }
       if (ev.button === 2) this.state.pressed.add('Mouse2');
     });
     this.on(window, 'mouseup', (e) => {
       if ((e as MouseEvent).button === 0) this.state.firing = false;
+    });
+    this.on(document, 'pointerlockchange', () => {
+      if (!this.locked) {
+        this.state.firing = false;
+        this.state.pressed.clear();
+        this.down.clear();
+      }
     });
     this.on(this.canvas, 'contextmenu', (e) => e.preventDefault());
 
