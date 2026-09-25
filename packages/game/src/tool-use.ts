@@ -342,9 +342,11 @@ export class ChargeSystem {
       );
     }
 
+    // Сначала отделяем и регистрируем новые обломки в физике: иначе
+    // импульс успевает пройти до их появления и взрыв их не расталкивает.
+    sim.settle();
     sim.physics.applyRadialImpulse(c.position, c.radius * 2, this.impulse);
     sim.fire.igniteArea(sim.world, c.position, c.radius * 0.8, 1);
-    sim.settle();
     return true;
   }
 

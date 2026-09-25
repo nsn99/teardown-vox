@@ -956,6 +956,35 @@ function shapeCleanup(body: Body): void {
   body.collidersDirty = true;
 }
 
+/** После удара свободный обломок тоже может распасться на несвязные части.
+ * Якоря здесь не используются: связный падающий кусок остаётся тем же телом.
+ */
+function splitFallingDebris(body: Body, cfg: Required<StructureOptions>): StructureResult {
+  const result: StructureResult = { fragments: [], detachedVoxels: 0, dustVoxels: 0, stressFailures: 0 };
+  for (const shape of body.shapes) {
+    if (!shape.structureDirty || shape.solidVoxels === 0) continue;
+    const components = findLooseComponents(shape, new Uint8Array(shape.volume));
+    components.sort((a, b) => b.length - a.length);
+    shape.clearStructureDirty();
+    shape.takeStructureChanges();
+    // Крупнейшая компонента сохраняет исходное тело и его движение.
+    for (const comp of components.slice(1)) {
+      if (comp.length < cfg.minFragmentVoxels) {
+        for (const i of comp) shape.setAt(i, Mat.Air);
+        result.dustVoxels += comp.length;
+        continue;
+      }
+      // Остаток дочитается в следующем проходе, не исчезает по лимиту.
+      if (result.fragments.length >= cfg.maxFragmentsPerStep) break;
+      const fragment = extractFragment(body, shape, comp);
+      result.fragments.push({body: fragment.body, voxels: comp.length, mass: fragment.mass, center: fragment.center});
+      result.detachedVoxels += comp.length;
+    }
+  }
+  shapeCleanup(body);
+  return result;
+}
+
 /**
  * Прогоняет структурный анализ по всем телам мира, у которых накопилась
  * грязная область. Обломки сразу добавляются в мир, и, если после отделения
@@ -977,15 +1006,16 @@ export function stepStructure(
 
   for (const body of [...world.bodies.values()]) {
     if (body.destroyed || body.passive) continue;
-    // Динамические обломки в Teardown уже жёсткие: их не пересчитываем.
-    if (body.kind !== 'static') continue;
+    // Для падающих обломков проверяем связность, но не статические нагрузки.
+    // Техника управляет собственными узлами и в этот разбор не входит.
+    if (body.kind !== 'static' && !body.tags.has('debris')) continue;
     const dirty = body.shapes.some((s) => s.structureDirty);
     if (!dirty) continue;
     // Кончилось время — остальные тела досчитаем в следующем проходе.
     // Их чанки остаются грязными, ничего не теряется.
     if (cfg.timeBudgetMs > 0 && performance.now() - started > cfg.timeBudgetMs) break;
 
-    const res = solveBodyStructure(body, opts);
+    const res = body.kind === 'static' ? solveBodyStructure(body, opts) : splitFallingDebris(body, cfg);
 
     for (const f of res.fragments) {
       world.addBody(f.body);

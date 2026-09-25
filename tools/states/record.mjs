@@ -31,6 +31,7 @@ const argValue = (name, fallback) => {
 };
 const outDir = resolve(root, argValue('--out', 'shots/states'));
 const only = argValue('--only', '');
+const skipCollapse = args.includes('--skip-collapse');
 const PORT = 4323;
 const FPS = 10;
 
@@ -124,7 +125,7 @@ try {
     made.push({ ...job, start, end, frames: 40 });
     console.log(`  ✓ ${start} → ${end}`);
   }
-  if (!only || only === 'collapse') {
+  if (!skipCollapse && (!only || only === 'collapse')) {
     console.log('… обрушение-склада');
     await page.evaluate(() => window.tvox.captureStart(false));
     await page.evaluate(() => {
@@ -161,9 +162,11 @@ try {
     console.log(`  ✓ отделено ${detached} вокселей`);
   }
   if (errors.length) throw new Error(errors.join('\n'));
-  if (!only && made.length !== 20) throw new Error(`Ожидалось 20 роликов, получено ${made.length}`);
-  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify({fps:FPS, recorded:new Date().toISOString(), clips:made}, null, 2));
-  writeFileSync(join(outDir, 'README.md'), '# Ролики состояний\n\nФиксированный шаг 1/60 с, 10 кадров/с. Каждый стенд начинает чистую сцену.\n\n'+made.map(m => `- ${m.file}: ${m.start ?? ''} → ${m.end ?? m.detached}`).join('\n')+'\n');
+  const expected = skipCollapse ? 19 : 20;
+  if (!only && made.length !== expected) throw new Error(`Ожидалось ${expected} роликов, получено ${made.length}`);
+  const suffix = only ? `-${only.replace(/[^a-zа-я0-9_-]/gi, '_')}` : skipCollapse ? '-stands' : '';
+  writeFileSync(join(outDir, `manifest${suffix}.json`), JSON.stringify({fps:FPS, recorded:new Date().toISOString(), clips:made}, null, 2));
+  writeFileSync(join(outDir, `README${suffix}.md`), '# Ролики состояний\n\nФиксированный шаг 1/60 с, 10 кадров/с. Каждый стенд начинает чистую сцену.\n\n'+made.map(m => `- ${m.file}: ${m.start ?? ''} → ${m.end ?? m.detached}`).join('\n')+'\n');
   console.log(`Готово: ${made.length} роликов`);
 } finally {
   await browser?.close();

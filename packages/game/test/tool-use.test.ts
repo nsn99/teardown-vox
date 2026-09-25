@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Body, Mat, Simulation, VoxelShape, v3 } from '@tvox/core';
+import { Body, Mat, RapierPhysics, Simulation, VoxelShape, v3 } from '@tvox/core';
 import {
   ChargeSystem,
   Inventory,
@@ -187,6 +187,24 @@ describe('огнетушитель и баллончик', () => {
 });
 
 describe('взрывчатка', () => {
+  it('взрыв толкает только что отделённую верхушку колонны', async () => {
+    const sim = new Simulation();
+    const shape = new VoxelShape({sx: 1, sy: 40, sz: 1, voxelSize: 0.1, grounded: true});
+    shape.fill({}, Mat.Wood);
+    shape.transform.position = v3(1, 0, 0);
+    sim.world.addBody(new Body({kind: 'static', shapes: [shape]}));
+    sim.setPhysics(await RapierPhysics.create(sim.world));
+    const ctx = ctxFor(sim, 'explosive');
+    ctx.origin = v3(0, 0.5, 0.05);
+    const charges = new ChargeSystem({fuse: Infinity});
+    expect(charges.place(ctx)).not.toBeNull();
+    charges.detonateAll(sim);
+    sim.step(1/60);
+    const fragment = [...sim.world.bodies.values()].find(b => b.tags.has('debris'));
+    expect(fragment).toBeDefined();
+    expect(fragment!.velocity.y).toBeGreaterThan(0);
+    sim.dispose();
+  });
   it('ставится на поверхность и взрывается по таймеру', () => {
     const { sim, shape } = wallWorld(Mat.Brick);
     const ctx = ctxFor(sim, 'explosive');

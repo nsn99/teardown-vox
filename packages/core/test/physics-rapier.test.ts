@@ -60,6 +60,31 @@ describe('Rapier как физический бэкенд', () => {
     physics.dispose();
   }, 60_000);
 
+  it('новый фрагмент сохраняет начальную скорость при передаче в Rapier', async () => {
+    const world = new VoxelWorld({gravity: v3()});
+    const body = cube(world, 3, Mat.Wood);
+    body.velocity = v3(2, 0, 0);
+    body.angularVelocity = v3(0, 1, 0);
+    const physics = await RapierPhysics.create(world);
+    physics.sync(body);
+    physics.step(1/60);
+    expect(body.velocity.x).toBeGreaterThan(1.9);
+    expect(body.angularVelocity.y).toBeGreaterThan(0.9);
+    physics.dispose();
+  });
+
+  it('взрыв действует по центру массы смещённой формы, а не по началу координат тела', async () => {
+    const world = new VoxelWorld({gravity: v3()});
+    const body = cube(world, 0, Mat.Wood);
+    body.shapes[0].transform.position = v3(30, 3, 0);
+    const physics = await RapierPhysics.create(world);
+    physics.sync(body);
+    physics.applyRadialImpulse(v3(29, 3.3, .3), 4, 100);
+    physics.step(1/60);
+    expect(body.velocity.x).toBeGreaterThan(0);
+    physics.dispose();
+  });
+
   it('тело со временем засыпает', async () => {
     if (!available) return;
     const world = new VoxelWorld();
