@@ -11,11 +11,12 @@ import { RemeshQueue } from '@tvox/render';
  */
 
 /** Очередь с журналом отправок и ручным «воркером». */
-function bench(slots: number) {
+function bench(slots: number, acceptSuperseded = false) {
   const sent: { key: string; token: number; payload: string }[] = [];
   let built = 0;
   const q = new RemeshQueue<string>({
     slots,
+    acceptSuperseded,
     send: (key, token, payload) => sent.push({ key, token, payload }),
   });
   const put = (key: string, priority: number) =>
@@ -73,6 +74,23 @@ describe('очередь ремеша', () => {
     expect(b.q.outstanding).toBe(1);
   });
 
+  it('повтор в работе не теряет место и не мешает другим чанкам', () => {
+    const b = bench(2);
+    b.put('огонь', 0);
+    b.q.pump();
+    b.put('огонь', 0);
+    b.put('стена', 10);
+    b.q.pump();
+    expect(b.sent.map(s => s.key)).toEqual(['огонь', 'стена']);
+    expect(b.answer(0)).toBe(false);
+    b.q.pump();
+    expect(b.sent.map(s => s.key)).toEqual(['огонь', 'стена', 'огонь']);
+    expect(b.answer(1)).toBe(true);
+    expect(b.answer(2)).toBe(true);
+    expect(b.q.active).toBe(0);
+    expect(b.q.outstanding).toBe(0);
+  });
+
   it('ответ по устаревшей заявке выбрасывается', () => {
     const b = bench(2);
     b.put('стена', 5);
@@ -85,6 +103,28 @@ describe('очередь ремеша', () => {
     expect(b.sent.length).toBe(2);
     expect(b.answer(1)).toBe(true);
     expect(b.q.outstanding).toBe(0);
+  });
+
+  it('при непрерывном горении показывает промежуточный меш и сохраняет свежую заявку', () => {
+    const b = bench(2, true);
+    b.put('огонь', 0);
+    b.q.pump();
+    for (let i = 0; i < 20; i++) {
+      b.put('огонь', 0);
+      b.q.pump();
+      expect(b.q.active).toBe(1);
+      expect(b.q.outstanding).toBe(1);
+      expect(b.answer(i)).toBe(true);
+      expect(b.q.hasPending('огонь')).toBe(true);
+      b.q.pump();
+    }
+    expect(b.answer(20)).toBe(true);
+    expect(b.q.active).toBe(0);
+    expect(b.q.outstanding).toBe(0);
+    b.put('удалён', 0);
+    b.q.pump();
+    b.q.cancel('удалён');
+    expect(b.answer(21)).toBe(false);
   });
 
   it('дважды пришедший ответ не освобождает лишнего места', () => {

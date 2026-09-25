@@ -35,9 +35,11 @@ export class AudioPlayer {
   private noise: AudioBuffer | null = null;
   private loops = new Map<SoundId, Voice>();
   private muted = false;
+  private suspended = true;
 
   /** Слышимость зависит от жеста пользователя: браузер иначе не пустит. */
   resume(): void {
+    this.suspended = false;
     try {
       if (!this.ctx) this.init();
     } catch (err) {
@@ -52,6 +54,15 @@ export class AudioPlayer {
     this.ctx?.resume().catch(() => undefined);
   }
 
+  /** Меню останавливает и петли, и уже запущенные разовые звуки. */
+  suspend(): void {
+    if (this.suspended) return;
+    this.suspended = true;
+    // Закрываем контекст, чтобы хвосты разовых звуков не оживали
+    // вместе с новой миссией. resume() создаст его по жесту игрока.
+    this.dispose();
+  }
+
   setMuted(value: boolean): void {
     this.muted = value;
     if (!this.master || !this.ctx) return;
@@ -61,7 +72,7 @@ export class AudioPlayer {
 
   /** Отыграть реплики кадра. */
   play(cues: SoundCue[]): void {
-    if (this.muted) return;
+    if (this.muted || this.suspended) return;
     if (!this.ctx) return;
 
     const wanted = new Set<SoundId>();
@@ -82,9 +93,10 @@ export class AudioPlayer {
 
   dispose(): void {
     this.stopLoops();
-    void this.ctx?.close();
+    this.ctx?.close().catch(() => undefined);
     this.ctx = null;
     this.master = null;
+    this.noise = null;
   }
 
   // -------------------------------------------------------------------

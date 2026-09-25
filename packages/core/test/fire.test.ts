@@ -257,3 +257,31 @@ describe('жизненный цикл', () => {
     expect(out).toBe(1);
   });
 });
+
+it('тушение уже обугленного дерева не удаляет его и останавливает прогорание', () => {
+  const shape = makeShape(3, 3, 3);
+  shape.fill({}, Mat.Charred);
+  const { world, body } = worldWith(shape);
+  const fire = new FireSystem();
+  const index = shape.idx(1, 2, 1);
+  fire.ignite(body, shape, index);
+  fire.step(world, 0.2);
+  const before = shape.data.slice();
+  expect(fire.extinguish(world, voxelCenter(1, 2, 1), 1.1, 1)).toBe(1);
+  burn(fire, world, 10);
+  expect(fire.burningCount).toBe(0);
+  expect(shape.data).toEqual(before);
+});
+
+it('выборка для эффектов ограничена и охватывает весь пожар без тушения клеток', () => {
+  const shape = makeShape(100, 1, 1);
+  shape.fill({}, Mat.Wood);
+  const { body } = worldWith(shape);
+  const fire = new FireSystem();
+  for (let x = 0; x < 100; x++) fire.ignite(body, shape, x);
+  const points = [...fire.burningPoints(10)];
+  expect(points).toHaveLength(10);
+  expect(points.at(-1)!.position.x).toBeGreaterThan(8);
+  expect(fire.burningCount).toBe(100);
+  expect([...fire.burningPoints(0)]).toEqual([]);
+});

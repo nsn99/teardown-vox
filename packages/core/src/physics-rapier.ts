@@ -91,6 +91,7 @@ export class RapierPhysics implements PhysicsBackend {
   private rapierWorld: import('@dimforge/rapier3d-compat').World;
   private events: import('@dimforge/rapier3d-compat').EventQueue;
   private pending: Body[] = [];
+  private pendingIds = new Set<number>();
 
   constructor(
     private RAPIER: RapierModule,
@@ -137,7 +138,10 @@ export class RapierPhysics implements PhysicsBackend {
       this.create(body);
       return;
     }
-    if (body.collidersDirty) this.pending.push(body);
+    if (body.collidersDirty && !this.pendingIds.has(body.id)) {
+      this.pending.push(body);
+      this.pendingIds.add(body.id);
+    }
     if (body.kind !== 'dynamic') return;
 
     const p = body.transform.position;
@@ -335,6 +339,7 @@ export class RapierPhysics implements PhysicsBackend {
     let rebuilt = 0;
     while (this.pending.length > 0 && rebuilt < this.cfg.rebuildBudget) {
       const body = this.pending.shift()!;
+      this.pendingIds.delete(body.id);
       const entry = this.entries.get(body.id);
       if (!entry || body.destroyed) continue;
       if (this.dirtyChunkCount(body) > 0) {
@@ -342,6 +347,7 @@ export class RapierPhysics implements PhysicsBackend {
         // Не всё влезло в бюджет — тело остаётся в очереди на следующий шаг.
         if (this.dirtyChunkCount(body) > 0) {
           this.pending.push(body);
+          this.pendingIds.add(body.id);
           break;
         }
       } else {
@@ -455,6 +461,8 @@ export class RapierPhysics implements PhysicsBackend {
   dispose(): void {
     for (const entry of [...this.entries.values()]) this.remove(entry.body);
     this.entries.clear();
+    this.pending.length = 0;
+    this.pendingIds.clear();
     this.rapierWorld.free();
   }
 }

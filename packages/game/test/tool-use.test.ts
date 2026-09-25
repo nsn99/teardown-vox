@@ -36,6 +36,23 @@ function ctxFor(sim: Simulation, tool: ToolId, tier = 0, unlimited = false): Too
   };
 }
 
+it('струя тушит край прогоревшего отверстия, даже когда прицел проходит сквозь него', () => {
+  const { sim, shape, body } = wallWorld(Mat.Wood);
+  // Сквозная щель напротив глаз. Попадания в стену больше нет.
+  for (let x = 0; x < shape.sx; x++) for (let y = 10; y < 20; y++) for (let z = 15; z < 25; z++) {
+    shape.set(x, y, z, Mat.Air);
+  }
+  const index = shape.idx(0, 20, 20);
+  sim.fire.ignite(body, shape, index);
+  const before = shape.solidVoxels;
+  const result = useTool(ctxFor(sim, 'extinguisher'));
+  expect(result.used).toBe(true);
+  expect(result.doused).toBe(1);
+  expect(sim.fire.burningCount).toBe(0);
+  expect(sim.fire.isWet(shape, index)).toBe(true);
+  expect(shape.solidVoxels).toBe(before);
+});
+
 describe('кувалда', () => {
   it.each(['sledge', 'shotgun', 'blowtorch'] as const)('%s максимальной ступени не пробивает бетон', (tool) => {
     const { sim, shape } = wallWorld(Mat.Concrete);

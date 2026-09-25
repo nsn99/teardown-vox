@@ -1,4 +1,4 @@
-import { Vec3, distance, dot, makeRng, normalize, v3 } from './math.js';
+import { Vec3, dot, inverseTransformPoint, makeRng, normalize, v3 } from './math.js';
 import { Mat, material } from './materials.js';
 import { VoxelShape } from './voxel-shape.js';
 import { Body } from './body.js';
@@ -85,10 +85,15 @@ export class FireSystem {
   }
 
   /** Горящие воксели в мировых координатах — для частиц и света. */
-  *burningPoints(): Generator<{ position: Vec3; heat: number }> {
+  *burningPoints(limit = Infinity): Generator<{ position: Vec3; heat: number }> {
+    if (limit <= 0) return;
+    // Равномерная выборка по всем очагам, а не только начало первого пожара.
+    const stride = Math.max(1, Math.ceil(this.burningTotal / limit));
+    let visited = 0;
     const c = { x: 0, y: 0, z: 0 };
     for (const sf of this.shapes.values()) {
       for (const cell of sf.cells.values()) {
+        if (visited++ % stride !== 0) continue;
         sf.shape.coords(cell.index, c);
         yield {
           position: sf.shape.voxelCenterWorld(c.x, c.y, c.z, sf.body.transform),
@@ -133,21 +138,15 @@ export class FireSystem {
       if (body.destroyed) continue;
       for (const shape of body.shapes) {
         if (shape.solidVoxels === 0) continue;
-        const local = shape.worldToVoxel(center, body.transform);
-        const r = Math.ceil(radius / shape.voxelSize);
-        for (let y = local.y - r; y <= local.y + r; y++) {
-          for (let z = local.z - r; z <= local.z + r; z++) {
-            for (let x = local.x - r; x <= local.x + r; x++) {
-              if (!shape.inBounds(x, y, z)) continue;
-              const p = shape.voxelCenterWorld(x, y, z, body.transform);
-              if (distance(p, center) > radius) continue;
-              const i = shape.idx(x, y, z);
-              if (!this.isExposed(shape, x, y, z)) continue;
-              if (this.ignite(body, shape, i, heat)) {
-                n++;
-                world.events.emit('fire:ignited', { body, shape, index: i, point: p });
-              }
-            }
+        const c = { x: 0, y: 0, z: 0 };
+        for (const i of sprayCells(body, shape, center, center, radius)) {
+          if (this.burningTotal >= this.cfg.maxBurning) return n;
+          shape.coords(i, c);
+          if (!this.isExposed(shape, c.x, c.y, c.z)) continue;
+          if (this.ignite(body, shape, i, heat)) {
+            n++;
+            const point = shape.voxelCenterWorld(c.x, c.y, c.z, body.transform);
+            world.events.emit('fire:ignited', { body, shape, index: i, point });
           }
         }
       }
@@ -160,33 +159,26 @@ export class FireSystem {
    * не даёт разгореться заново.
    */
   extinguish(world: VoxelWorld, center: Vec3, radius: number, power = 1): number {
+    return this.extinguishAlong(world, center, center, radius, power);
+  }
+
+  /** Струя тушит на всём пути до поверхности, включая край прогоревшей дыры. */
+  extinguishAlong(world: VoxelWorld, from: Vec3, to: Vec3, radius: number, power = 1): number {
     let doused = 0;
     for (const body of world.bodies.values()) {
       if (body.destroyed) continue;
       for (const shape of body.shapes) {
-        const sf = this.shapes.get(shape.id);
-        const local = shape.worldToVoxel(center, body.transform);
-        const r = Math.ceil(radius / shape.voxelSize);
-        for (let y = local.y - r; y <= local.y + r; y++) {
-          for (let z = local.z - r; z <= local.z + r; z++) {
-            for (let x = local.x - r; x <= local.x + r; x++) {
-              if (!shape.inBounds(x, y, z)) continue;
-              const p = shape.voxelCenterWorld(x, y, z, body.transform);
-              if (distance(p, center) > radius) continue;
-              const i = shape.idx(x, y, z);
-              if (shape.data[i] === Mat.Air) continue;
-              const target = sf ?? this.slot(body, shape);
-              target.wet.set(i, this.cfg.wetDuration);
-              const cell = target.cells.get(i);
-              if (cell) {
-                cell.heat -= power * 0.9;
-                if (cell.heat <= this.cfg.extinguishHeat) {
-                  target.cells.delete(i);
-                  this.burningTotal--;
-                  doused++;
-                }
-              }
-            }
+        let target = this.shapes.get(shape.id);
+        for (const i of sprayCells(body, shape, from, to, radius)) {
+          target ??= this.slot(body, shape);
+          target.wet.set(i, this.cfg.wetDuration);
+          const cell = target.cells.get(i);
+          if (!cell) continue;
+          cell.heat -= power * 0.9;
+          if (cell.heat <= this.cfg.extinguishHeat) {
+            target.cells.delete(i);
+            this.burningTotal--;
+            doused++;
           }
         }
       }
@@ -315,5 +307,33 @@ export class FireSystem {
 
   isWet(shape: VoxelShape, index: number): boolean {
     return (this.shapes.get(shape.id)?.wet.get(index) ?? 0) > 0;
+  }
+}
+
+/** Капсула в координатах формы: обходим только пересечение с её границами.
+ * Преобразования считаются дважды на форму, а не для каждой клетки мира.
+ */
+function* sprayCells(body: Body, shape: VoxelShape, from: Vec3, to: Vec3, radius: number): Generator<number> {
+  if (shape.solidVoxels === 0 || radius < 0) return;
+  const a = inverseTransformPoint(shape.transform, inverseTransformPoint(body.transform, from));
+  const b = inverseTransformPoint(shape.transform, inverseTransformPoint(body.transform, to));
+  const vs = shape.voxelSize;
+  const x0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - radius) / vs));
+  const y0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - radius) / vs));
+  const z0 = Math.max(0, Math.floor((Math.min(a.z, b.z) - radius) / vs));
+  const x1 = Math.min(shape.sx - 1, Math.floor((Math.max(a.x, b.x) + radius) / vs));
+  const y1 = Math.min(shape.sy - 1, Math.floor((Math.max(a.y, b.y) + radius) / vs));
+  const z1 = Math.min(shape.sz - 1, Math.floor((Math.max(a.z, b.z) + radius) / vs));
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+  const length2 = dx * dx + dy * dy + dz * dz;
+  const radius2 = radius * radius;
+  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    const i = shape.idx(x, y, z);
+    const mat = shape.data[i];
+    if (mat === Mat.Air || material(mat).flammability <= 0) continue;
+    const px = (x + 0.5) * vs - a.x, py = (y + 0.5) * vs - a.y, pz = (z + 0.5) * vs - a.z;
+    const t = length2 > 0 ? Math.max(0, Math.min(1, (px * dx + py * dy + pz * dz) / length2)) : 0;
+    const ex = px - t * dx, ey = py - t * dy, ez = pz - t * dz;
+    if (ex * ex + ey * ey + ez * ez <= radius2) yield i;
   }
 }

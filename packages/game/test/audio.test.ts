@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Body, Mat, VoxelShape, VoxelWorld, v3 } from '@tvox/core';
+import { Body, FireSystem, Mat, VoxelShape, VoxelWorld, v3 } from '@tvox/core';
 import { AudioDirector, SoundCue, soundOfMaterial } from '@tvox/game';
 
 /**
@@ -8,6 +8,22 @@ import { AudioDirector, SoundCue, soundOfMaterial } from '@tvox/game';
  */
 
 const LISTENER = v3(0, 0, 0);
+
+it('звук пожара прекращается после тушения и не переносится в новый мир', () => {
+  const { world: w } = chunk(Mat.Wood);
+  const fire = new FireSystem();
+  const audio = new AudioDirector();
+  audio.listen(w, () => fire.burningCount);
+  fire.igniteArea(w, v3(0, 0, 0), 2);
+  expect(audio.update(1 / 60, LISTENER).some(c => c.id === 'fire')).toBe(true);
+  fire.extinguish(w, v3(0, 0, 0), 2, 2);
+  expect(audio.update(1 / 60, LISTENER).some(c => c.id === 'fire')).toBe(false);
+  fire.step(w, 7);
+  fire.igniteArea(w, v3(0, 0, 0), 2);
+  audio.dispose();
+  audio.listen(new VoxelWorld());
+  expect(audio.update(1 / 60, LISTENER)).toEqual([]);
+});
 
 function world(): VoxelWorld {
   return new VoxelWorld();

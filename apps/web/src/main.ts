@@ -27,7 +27,7 @@ import {
   stepStructure,
   v3,
 } from '@tvox/core';
-import { ChargeView, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { ChargeView, ExtinguisherJet, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -38,8 +38,10 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const renderer = new VoxelRenderer({ canvas, quality: 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
+const extinguisherJet = new ExtinguisherJet();
+let extinguisherHitUntil = 0;
 const chargeView = new ChargeView();
-renderer.scene.add(particles.points, fireLights.group, chargeView.group);
+renderer.scene.add(particles.points, fireLights.group, chargeView.group, extinguisherJet.mesh);
 const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
@@ -117,12 +119,15 @@ function saveProfile(): void {
 // ---------------------------------------------------------------------------
 
 function startRun(inSandbox: boolean): void {
+  player.suspend();
   sandbox = inSandbox;
   heist?.sim.dispose();
   particles.clear();
+  extinguisherJet.clear();
+  extinguisherHitUntil = 0;
   chargeView.update([]);
 
-  heist = new Heist({ level, profile, sandbox: inSandbox });
+  heist = new Heist({ level, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
   heist.start();
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
@@ -133,7 +138,8 @@ function startRun(inSandbox: boolean): void {
   physicsReady = upgradeToRapier(heist);
 
   audioOff?.();
-  audioOff = audio.listen(heist.sim.world);
+  audio.dispose();
+  audioOff = audio.listen(heist.sim.world, () => heist?.sim.fire.burningCount ?? 0);
   player.resume();
 
   menu.hide();
@@ -152,6 +158,8 @@ function startRun(inSandbox: boolean): void {
 
 function toHub(): void {
   paused = true;
+  extinguisherJet.clear();
+  player.suspend();
   hud.hide();
   input.releaseLock();
   menu.render(profile, level.brief);
@@ -185,7 +193,10 @@ function wireEvents(h: Heist): void {
     particles.emitSparks(e.point, 6);
   });
 
-  h.sim.world.events.on('fire:ignited', (e) => particles.emitFire(e.point, 1));
+  h.sim.world.events.on('fire:ignited', (e) => {
+    const limit = { low: 256, medium: 768, high: 1536 }[renderer.currentQuality];
+    if (particles.count < limit) particles.emitFire(e.point, 1);
+  });
 
   h.mission.events.on('alarm:started', () =>
     hud.message(`Тревога. ${Math.round(h.mission.config.alarmSeconds)} секунд`, 3),
@@ -199,6 +210,7 @@ function wireEvents(h: Heist): void {
 
   h.events.on('heist:finished', (r) => {
     paused = true;
+    player.suspend();
     input.releaseLock();
     saveProfile();
     const record = profile.record(r.missionId);
@@ -298,15 +310,25 @@ function handleActions(h: Heist): void {
   if (input.take('KeyR')) startRun(sandbox);
 
   if (input.take('Escape')) {
-    input.releaseLock();
-    paused = true;
-    menu.render(profile, level.brief);
-    menu.show();
+    toHub();
+    return;
   }
 
   if (input.state.firing) {
     const res = h.use();
     if (res.used) {
+      if (res.tool === 'extinguisher' && res.point) {
+        extinguisherJet.show(h.eye, res.point);
+        if ((res.doused ?? 0) > 0) extinguisherHitUntil = performance.now() + 800;
+        const range = h.inventory.activeStats.range;
+        hud.message(
+          h.sim.fire.burningCount === 0 ? 'Огня не осталось' :
+          performance.now() < extinguisherHitUntil ? 'Тушение действует — ведите струю по огню' :
+          res.sprayHitSurface ? 'Пена попадает на поверхность. Цельтесь в основание огня' :
+          `Струя не достаёт до поверхности. Подойдите ближе: дальность ${range} м`,
+          1.2,
+        );
+      }
       if (res.point && (res.removed ?? 0) > 0) {
         particles.emitSparks(res.point, h.inventory.active === 'blowtorch' ? 10 : 4);
       }
@@ -363,16 +385,28 @@ function frame(now: number): void {
     h.yaw += look.yaw;
     h.pitch = clamp(h.pitch + look.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
     handleActions(h);
+    if (paused) return;
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT);
   } else {
     input.clearPressed();
   }
 
+  if (paused) {
+    player.suspend();
+    return;
+  }
+  // Захват мыши асинхронный: ожидание не должно закрывать новый звук.
+  if (!captureMode && !input.locked) return;
+
   particles.step(dt);
-  fireLights.update(h.sim.fire.burningPoints(), h.sim.world.time);
-  for (const p of h.sim.fire.burningPoints()) {
-    if (!captureMode && Math.random() < 0.06) particles.emitFire(p.position, p.heat);
+  extinguisherJet.step(dt);
+  if (h.inventory.active !== 'extinguisher') extinguisherJet.clear();
+  const firePointLimit = { low: 48, medium: 128, high: 256 }[renderer.currentQuality];
+  const firePoints = [...h.sim.fire.burningPoints(firePointLimit)];
+  fireLights.update(firePoints, h.sim.world.time);
+  for (const p of firePoints) {
+    if (!captureMode && Math.random() < dt * 3.6) particles.emitFire(p.position, p.heat);
   }
 
   // Слушатель — там же, где камера: звук должен приходить оттуда, куда
@@ -596,15 +630,13 @@ enableLevelDrop(window, {
 
 canvas.addEventListener('click', () => {
   // Браузер пускает звук только после жеста — клик по канвасу и есть жест.
-  player.resume();
+  if (!paused) player.resume();
   if (!paused && !input.locked) input.requestLock();
 });
 
 document.addEventListener('pointerlockchange', () => {
   if (!input.locked && !paused && !menu.visible && !result.visible) {
-    paused = true;
-    menu.render(profile, level.brief);
-    menu.show();
+    toHub();
   }
 });
 

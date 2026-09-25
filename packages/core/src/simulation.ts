@@ -24,6 +24,8 @@ export interface SimulationOptions {
   fixedStep?: number;
   /** Больше этого числа шагов за кадр не догоняем: лучше замедлиться, чем зависнуть. */
   maxStepsPerFrame?: number;
+  /** Мягкий предел CPU на догоняющие шаги; один неделимый шаг может превысить его. */
+  frameBudgetMs?: number;
   /** Структурный анализ реже физики: он дорогой, а обвал не обязан быть мгновенным. */
   structureEveryNSteps?: number;
   /**
@@ -80,6 +82,7 @@ export class Simulation {
   private backend: PhysicsBackend;
 
   private accumulator = 0;
+  private frameBudgetMs: number;
   private stepIndex = 0;
   private structureOpts: StructureOptions;
   private maxSteps: number;
@@ -101,6 +104,7 @@ export class Simulation {
     this.smoke = new SmokeField(opts.smoke);
     this.fixedStep = opts.fixedStep ?? 1 / 60;
     this.maxSteps = opts.maxStepsPerFrame ?? 5;
+    this.frameBudgetMs = opts.frameBudgetMs && opts.frameBudgetMs > 0 ? opts.frameBudgetMs : Infinity;
     this.structureEvery = opts.structureEveryNSteps ?? 2;
     this.structureBudgetMs = opts.structureBudgetMs ?? 2;
     this.structureOpts = opts.structure ?? {};
@@ -137,12 +141,13 @@ export class Simulation {
   step(dt: number): SimStepStats {
     // Разрушение — первым делом и ровно на бюджет кадра: физика должна
     // считать уже по новой геометрии, а не по вчерашней.
+    const frameStarted = performance.now();
     const carved = this.destruction.flush(this.world).removed;
 
     this.accumulator += dt;
     let steps = 0;
     let structure: StructureResult | null = null;
-    let burning = 0;
+    let burning = this.fire.burningCount;
 
     // Допуск: без него накопленная ошибка double съедает каждый N-й шаг
     // (0.05 - 4×0.01 даёт 0.00999…, и пятый шаг молча теряется).
@@ -171,6 +176,7 @@ export class Simulation {
             : 1;
         this.structureNextStep = this.stepIndex + skip;
       }
+      if (performance.now() - frameStarted >= this.frameBudgetMs) break;
     }
 
     // Накопитель не должен расти без предела: иначе после лага

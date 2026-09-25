@@ -33,11 +33,14 @@ interface Running {
   token: number;
   /** Нужен ли ещё результат. Отменённое доедет и будет выброшено. */
   wanted: boolean;
+  superseded: boolean;
 }
 
 export interface RemeshQueueOptions<T> {
   /** Сколько задач одновременно в работе — обычно по числу воркеров. */
   slots: number;
+  /** Показывать промежуточный меш, пока свежая версия ещё строится. */
+  acceptSuperseded?: boolean;
   /** Отправить задачу в работу. */
   send: (key: string, token: number, payload: T) => void;
 }
@@ -61,19 +64,23 @@ export class RemeshQueue<T> {
   /** Всего чанков, которые ещё не построены: и ждущие, и в работе. */
   get outstanding(): number {
     let n = this.waiting.size;
-    for (const r of this.running.values()) if (r.wanted) n++;
+    for (const [key, r] of this.running) if (r.wanted && !this.waiting.has(key)) n++;
     return n;
   }
 
   /**
    * Поставить чанк в очередь. Повторная заявка на тот же чанк заменяет
-   * прежнюю, а уже отданную воркеру — обесценивает: её результат построен
-   * по устаревшим вокселям, и принимать его нельзя.
+   * прежнюю. Уже отданный результат помечается устаревшим; сцена может
+   * показать его как промежуточный, сохраняя заявку на свежую геометрию.
    */
   submit(key: string, priority: number, build: () => T): void {
     const run = this.running.get(key);
-    if (run) run.wanted = false;
+    if (run) run.superseded = true;
     this.waiting.set(key, { key, priority, build });
+  }
+
+  hasPending(key: string): boolean {
+    return this.waiting.has(key);
   }
 
   /** Обновить приоритет ждущего чанка. Камера двигается — порядок меняется. */
@@ -101,7 +108,7 @@ export class RemeshQueue<T> {
       const next = this.takeNearest();
       if (!next) return;
       const token = ++this.seq;
-      this.running.set(next.key, { token, wanted: true });
+      this.running.set(next.key, { token, wanted: true, superseded: false });
       this.busy++;
       // Нарезка — здесь и только здесь: то, что отменили в очереди, не
       // стоило даже копирования вокселей.
@@ -121,7 +128,7 @@ export class RemeshQueue<T> {
     }
     this.running.delete(key);
     this.busy--;
-    return run.wanted;
+    return run.wanted && (!run.superseded || !!this.opts.acceptSuperseded);
   }
 
   /**
@@ -135,6 +142,8 @@ export class RemeshQueue<T> {
   private takeNearest(): Waiting<T> | undefined {
     let best: Waiting<T> | undefined;
     for (const w of this.waiting.values()) {
+      // Один ключ не может занимать два места: иначе теряется старый token.
+      if (this.running.has(w.key)) continue;
       if (!best || w.priority < best.priority) best = w;
     }
     if (best) this.waiting.delete(best.key);
