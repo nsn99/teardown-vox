@@ -204,6 +204,18 @@ describe('огнетушитель и баллончик', () => {
 });
 
 describe('взрывчатка', () => {
+  it('базовый заряд вплотную пробивает тяжёлый металл', () => {
+    const { sim, shape } = wallWorld(Mat.HeavyMetal);
+    const ctx = ctxFor(sim, 'explosive');
+    const charges = new ChargeSystem({ fuse: Infinity });
+
+    const before = shape.solidVoxels;
+    expect(charges.place(ctx)).not.toBeNull();
+    charges.detonateAll(sim);
+
+    expect(shape.solidVoxels).toBeLessThan(before);
+  });
+
   it('взрыв толкает только что отделённую верхушку колонны', async () => {
     const sim = new Simulation();
     const shape = new VoxelShape({sx: 1, sy: 40, sz: 1, voxelSize: 0.1, grounded: true});

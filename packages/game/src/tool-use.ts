@@ -239,7 +239,10 @@ function capsuleCarve(
 
 export interface Charge {
   id: number;
+  /** Положение корпуса заряда — чуть снаружи поверхности, чтобы он был виден. */
   position: Vec3;
+  /** Физический центр взрыва — на полвокселя внутри поверхности. */
+  blastCenter: Vec3;
   radius: number;
   power: number;
   /** Секунд до подрыва. Infinity — ждёт детонатора. */
@@ -295,6 +298,10 @@ export class ChargeSystem {
     const charge: Charge = {
       id: this.nextId++,
       position: add(hit.point, scale(hit.normal, 0.05)),
+      // Взрыв контактного заряда начинается на полвокселя внутри материала.
+      // Иначе расстояние до центра первой клетки может ослабить базовый
+      // заряд ниже порога heavy_metal ещё до первого слоя.
+      blastCenter: add(hit.point, scale(hit.normal, -hit.shape.voxelSize * 0.5)),
       radius: stats.radius,
       power: stats.power,
       fuse: this.fuse,
@@ -325,7 +332,7 @@ export class ChargeSystem {
     // очередь в следующих кадрах — на глаз это по-прежнему один хлопок.
     const budget = sim.destruction.budget;
     const res = explode(sim.world, {
-      center: c.position,
+      center: c.blastCenter,
       radius: c.radius,
       power: c.power,
       cause: 'explosive',
@@ -334,7 +341,7 @@ export class ChargeSystem {
     });
     if (res.removed >= budget) {
       sim.destruction.enqueue(
-        { kind: 'sphere', center: c.position, radius: c.radius },
+        { kind: 'sphere', center: c.blastCenter, radius: c.radius },
         {
           power: c.power,
           damage: 0,
@@ -349,8 +356,8 @@ export class ChargeSystem {
     // Сначала отделяем и регистрируем новые обломки в физике: иначе
     // импульс успевает пройти до их появления и взрыв их не расталкивает.
     sim.settle();
-    sim.physics.applyRadialImpulse(c.position, c.radius * 2, this.impulse);
-    sim.fire.igniteArea(sim.world, c.position, c.radius * 0.8, 1);
+    sim.physics.applyRadialImpulse(c.blastCenter, c.radius * 2, this.impulse);
+    sim.fire.igniteArea(sim.world, c.blastCenter, c.radius * 0.8, 1);
     return true;
   }
 
