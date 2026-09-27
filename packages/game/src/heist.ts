@@ -109,6 +109,10 @@ export class Heist {
     this.profile = opts.profile ?? new Profile();
     this.sim = new Simulation({
       ...opts.simulation,
+      fire: {
+        waterLevel: opts.level.waterLevel,
+        ...opts.simulation?.fire,
+      },
       physics: {
         // Цели миссии не должна разрушать даже падающая на них плита.
         protectedMaterials: this.sandbox ? EMPTY_SET : PROTECTED,
