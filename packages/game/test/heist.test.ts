@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Mat, Simulation, stepStructure, v3 } from '@tvox/core';
+import { Mat, Simulation, carve, stepStructure, v3 } from '@tvox/core';
 import {
   DEFAULT_INPUT,
   Heist,
@@ -103,6 +103,42 @@ describe('карта M: порт', () => {
     expect(res.fragments).toHaveLength(0);
     expect(res.dustVoxels).toBe(0);
     expect(sim.world.totalSolidVoxels()).toBe(before);
+  });
+
+  it('склад: четыре сектора опор отделяют верх склада', () => {
+    const sim = new Simulation();
+    portLevel.build(sim);
+
+    const sectors = [
+      { x: 10, y: 1, z: 18 },
+      { x: 22, y: 1, z: 18 },
+      { x: 10, y: 1, z: 28 },
+      { x: 22, y: 1, z: 28 },
+    ];
+
+    let detached = 0;
+
+    for (const center of sectors) {
+      carve(
+        sim.world,
+        {
+          kind: 'box',
+          center,
+          halfExtents: { x: 6, y: 0.4, z: 5 },
+        },
+        {
+          power: 2,
+          damage: 0,
+          instant: true,
+          falloff: 'none',
+          cause: 'test-support-cut',
+        },
+      );
+
+      detached += sim.settle().detachedVoxels;
+    }
+
+    expect(detached).toBeGreaterThan(200_000);
   });
 
   it('в гавани есть вода, и она пассивна', () => {
