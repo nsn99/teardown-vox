@@ -193,6 +193,22 @@ describe('тушение', () => {
     expect(fire.ignite(body, s, s.idx(12, 11, 1))).toBe(false);
   });
 
+  it('погружённый в воду огонь гаснет и не зажигается снова', () => {
+    const s = makeShape(3, 3, 3);
+    s.set(1, 1, 1, Mat.Wood);
+    const { world, body } = worldWith(s);
+    const fire = new FireSystem({ waterLevel: -0.5 });
+    const index = s.idx(1, 1, 1);
+
+    expect(fire.ignite(body, s, index)).toBe(true);
+
+    body.transform.position.y = -2;
+    fire.step(world, 0.1);
+
+    expect(fire.burningCount).toBe(0);
+    expect(fire.ignite(body, s, index)).toBe(false);
+  });
+
   it('влага испаряется, и материал снова горюч', () => {
     const s = woodWall();
     const { world, body } = worldWith(s);

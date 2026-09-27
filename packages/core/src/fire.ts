@@ -21,6 +21,8 @@ export interface FireOptions {
   windStrength?: number;
   /** Секунд, на которые вода блокирует возгорание. */
   wetDuration?: number;
+  /** Уровень поверхности воды в мировых координатах. Ниже него огонь невозможен. */
+  waterLevel?: number;
 }
 
 const DEFAULTS = {
@@ -33,6 +35,7 @@ const DEFAULTS = {
   wind: v3(0, 0, 0),
   windStrength: 0.8,
   wetDuration: 6,
+  waterLevel: -Infinity,
 } satisfies Required<FireOptions>;
 
 interface BurningCell {
@@ -103,6 +106,12 @@ export class FireSystem {
     }
   }
 
+  private isSubmerged(body: Body, shape: VoxelShape, index: number): boolean {
+    if (this.cfg.waterLevel === -Infinity) return false;
+    const c = shape.coords(index);
+    return shape.voxelCenterWorld(c.x, c.y, c.z, body.transform).y <= this.cfg.waterLevel;
+  }
+
   private slot(body: Body, shape: VoxelShape): ShapeFire {
     let sf = this.shapes.get(shape.id);
     if (!sf) {
@@ -118,6 +127,7 @@ export class FireSystem {
   ignite(body: Body, shape: VoxelShape, index: number, heat = 1): boolean {
     const mat = shape.data[index];
     if (mat === Mat.Air) return false;
+    if (this.isSubmerged(body, shape, index)) return false;
     const def = material(mat);
     if (def.flammability <= 0 || def.fuel <= 0) return false;
 
@@ -220,6 +230,11 @@ export class FireSystem {
       for (const cell of [...sf.cells.values()]) {
         const mat = shape.data[cell.index];
         if (mat === Mat.Air) {
+          sf.cells.delete(cell.index);
+          this.burningTotal--;
+          continue;
+        }
+        if (this.isSubmerged(body, shape, cell.index)) {
           sf.cells.delete(cell.index);
           this.burningTotal--;
           continue;
