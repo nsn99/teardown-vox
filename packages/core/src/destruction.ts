@@ -14,6 +14,7 @@ import {
   quatConjugate,
   quatIdentity,
   quatMultiply,
+  rotateVec,
   scale,
   sub,
   v3,
@@ -54,6 +55,8 @@ export interface CarveOptions {
   maxVoxels?: number;
   /** Не трогать эти тела. */
   ignoreBodies?: ReadonlySet<number>;
+  /** Часть удалённых вокселей становится небольшими физическими обломками. */
+  physicalDebris?: { velocity: Vec3 };
 }
 
 export interface DebrisSample {
@@ -73,6 +76,8 @@ export interface TouchedShape {
 }
 
 export interface CarveResult {
+  /** Обломки уже добавлены в мир; физика подхватит их на следующем шаге. */
+  fragments: Body[];
   removed: number;
   damaged: number;
   byMaterial: Map<number, number>;
@@ -86,6 +91,63 @@ export interface CarveResult {
 const MAX_DEBRIS_SAMPLES = 256;
 /** Полудиагональ вокселя: √3/2 ≈ 0.866. */
 const MIN_BRUSH_FACTOR = 0.87;
+
+/** Ограничиваем количество новых тел за один удар, остальное остаётся пылью. */
+const MAX_CARVED_FRAGMENTS = 32;
+const CARVED_FRAGMENT_SIZE = 4;
+
+class RemovedFragments {
+  private chunks = new Map<string, { body: Body; shape: VoxelShape; x: number; y: number; z: number }>();
+
+  constructor(private velocity: Vec3) {}
+
+  record(source: Body, shape: VoxelShape, index: number, x: number, y: number, z: number): void {
+    if (shape.data[index] === Mat.Foliage) return;
+    const n = CARVED_FRAGMENT_SIZE;
+    const x0 = Math.floor(x / n) * n;
+    const y0 = Math.floor(y / n) * n;
+    const z0 = Math.floor(z / n) * n;
+    const key = `${shape.id}:${x0}:${y0}:${z0}`;
+    let chunk = this.chunks.get(key);
+    if (!chunk) {
+      if (this.chunks.size >= MAX_CARVED_FRAGMENTS) return;
+      const fragment = new VoxelShape({
+        sx: Math.min(n, shape.sx - x0),
+        sy: Math.min(n, shape.sy - y0),
+        sz: Math.min(n, shape.sz - z0),
+        voxelSize: shape.voxelSize,
+        grounded: false,
+        name: `${shape.name}:chip`,
+        transform: {
+          position: add(shape.transform.position, rotateVec(shape.transform.rotation,
+            v3(x0 * shape.voxelSize, y0 * shape.voxelSize, z0 * shape.voxelSize))),
+          rotation: { ...shape.transform.rotation },
+        },
+      });
+      const body = new Body({
+        kind: 'dynamic',
+        transform: { position: { ...source.transform.position }, rotation: { ...source.transform.rotation } },
+        shapes: [fragment],
+        name: `${source.name}:chip`,
+        tags: ['debris', 'carved-debris'],
+      });
+      body.velocity = add(source.velocity, this.velocity);
+      body.angularVelocity = v3(1.2, 0.6, -0.8);
+      chunk = { body, shape: fragment, x: x0, y: y0, z: z0 };
+      this.chunks.set(key, chunk);
+    }
+    const target = chunk.shape.idx(x - chunk.x, y - chunk.y, z - chunk.z);
+    chunk.shape.setAt(target, shape.data[index]);
+    chunk.shape.damage[target] = shape.damage[index];
+    const paint = shape.paint.get(index);
+    if (paint !== undefined) chunk.shape.paint.set(target, paint);
+  }
+
+  finish(world: VoxelWorld): Body[] {
+    // Добавляем после обхода исходных тел: новые куски не попадают под тот же удар.
+    return [...this.chunks.values()].map((chunk) => world.addBody(chunk.body));
+  }
+}
 
 interface LocalField {
   /** Границы в индексах вокселей, уже обрезанные по форме. */
@@ -296,6 +358,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
   const worldBox = worldAabbOfBrush(brush);
 
   const result: CarveResult = {
+    fragments: [],
     removed: 0,
     damaged: 0,
     byMaterial: new Map(),
@@ -303,6 +366,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
     debris: [],
     center: v3(),
   };
+  const fragments = opts.physicalDebris ? new RemovedFragments(opts.physicalDebris.velocity) : undefined;
 
   let cx = 0;
   let cy = 0;
@@ -378,7 +442,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
                 const gx = at % shape.sx;
                 const gz = Math.floor(at / shape.sx) % shape.sz;
                 const gy = Math.floor(at / (shape.sx * shape.sz));
-                removeVoxel(shape, at, mat, result, shapeMaterials, body, gx, gy, gz);
+                removeVoxel(shape, at, mat, result, shapeMaterials, body, gx, gy, gz, fragments);
                 shapeRemoved++;
                 expand(region, gx, gy, gz);
                 for (const [nx, ny, nz] of [[gx-1,gy,gz], [gx+1,gy,gz], [gx,gy-1,gz], [gx,gy+1,gz], [gx,gy,gz-1], [gx,gy,gz+1]]) {
@@ -393,7 +457,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             }
 
             if (opts.instant) {
-              removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z);
+              removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z, fragments);
               shapeRemoved++;
               expand(region, x, y, z);
               continue;
@@ -406,7 +470,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             const inc = Math.max(1, Math.round(opts.damage * w));
             const next = shape.damage[i] + inc;
             if (next >= def.hp) {
-              removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z);
+              removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z, fragments);
               shapeRemoved++;
             } else {
               shape.damage[i] = next;
@@ -432,6 +496,8 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
       }
     }
   }
+
+  result.fragments = fragments?.finish(world) ?? [];
 
   if (result.debris.length > 0) {
     for (const d of result.debris) {
@@ -479,7 +545,9 @@ function removeVoxel(
   x: number,
   y: number,
   z: number,
+  fragments?: RemovedFragments,
 ): void {
+  fragments?.record(body, shape, index, x, y, z);
   shape.setAt(index, Mat.Air);
   result.removed++;
   result.byMaterial.set(mat, (result.byMaterial.get(mat) ?? 0) + 1);

@@ -311,6 +311,28 @@ describe('прохождение ограбления', () => {
     expect(h.driving).toBeNull();
   });
 
+  it('портовый катер может начать движение вперёд', () => {
+    const h = startedHeist();
+    const boat = h.vehicles.get('boat')!;
+    h.character.teleport({ ...boat.position });
+
+    expect(h.toggleVehicle()).toBe('boat');
+
+    const before = { ...boat.position };
+    const drive = { throttle: 1, steer: 0, brake: false, blade: false };
+
+    for (let i = 0; i < 120; i++) {
+      h.update(1 / 60, DEFAULT_INPUT, drive);
+    }
+
+    const travelled = Math.hypot(
+      boat.position.x - before.x,
+      boat.position.z - before.z,
+    );
+    expect(travelled).toBeGreaterThan(0.5);
+    expect(boat.speed).toBeGreaterThan(1);
+  });
+
   it('вдали от техники сесть не в что', () => {
     const h = startedHeist();
     h.character.teleport(v3(-100, 0, -100));
