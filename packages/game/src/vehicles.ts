@@ -146,6 +146,166 @@ export interface VehicleOptions {
   waterLevel?: number;
 }
 
+
+function addVehicleCabin(
+  shape: VoxelShape,
+  material: Mat,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  z0: number,
+  z1: number,
+): void {
+  // Металлическая оболочка кабины с пустым салоном.
+  shape.fill({ x0, x1, y0, y1, z0, z1 }, material);
+  shape.fill(
+    { x0: x0 + 1, x1: x1 - 1, y0: y0 + 1, y1: y1 - 1, z0: z0 + 1, z1: z1 - 1 },
+    Mat.Air,
+  );
+
+  const wy0 = y0 + 2;
+  const wy1 = y1 - 1;
+  if (wy1 <= wy0) return;
+
+  // Боковые окна.
+  shape.fill({ x0: x0 + 2, x1: x1 - 2, y0: wy0, y1: wy1, z0, z1: z0 + 1 }, Mat.Glass);
+  shape.fill({ x0: x0 + 2, x1: x1 - 2, y0: wy0, y1: wy1, z0: z1 - 1, z1 }, Mat.Glass);
+
+  // Переднее и заднее стёкла.
+  shape.fill({ x0, x1: x0 + 1, y0: wy0, y1: wy1, z0: z0 + 2, z1: z1 - 2 }, Mat.Glass);
+  shape.fill({ x0: x1 - 1, x1, y0: wy0, y1: wy1, z0: z0 + 2, z1: z1 - 2 }, Mat.Glass);
+}
+
+function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): void {
+  const x = shape.sx;
+  const y = shape.sy;
+  const z = shape.sz;
+
+  // Машину собираем из деталей, а не вырезаем из полного параллелепипеда.
+  // Так пустое пространство вокруг кабины, колёс, гусениц и рабочего
+  // оборудования действительно остаётся пустым.
+  shape.fill({}, Mat.Air);
+
+  switch (kind) {
+    case 'car': {
+      // Колёса выступают ниже и шире кузова.
+      for (const wx of [5, 27]) {
+        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 4, z0: 0, z1: 3 }, material);
+        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 4, z0: z - 3, z1: z }, material);
+      }
+
+      // Рама и нижняя часть кузова.
+      shape.fill({ x0: 1, x1: x - 1, y0: 3, y1: 7, z0: 2, z1: z - 2 }, material);
+
+      // Низкие багажник и капот.
+      shape.fill({ x0: 1, x1: 10, y0: 7, y1: 9, z0: 2, z1: z - 2 }, material);
+      shape.fill({ x0: 29, x1: x - 1, y0: 7, y1: 9, z0: 2, z1: z - 2 }, material);
+
+      addVehicleCabin(shape, material, 10, 29, 6, y, 3, z - 3);
+      break;
+    }
+
+    case 'pickup': {
+      for (const wx of [6, 33]) {
+        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 5, z0: 0, z1: 3 }, material);
+        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 5, z0: z - 3, z1: z }, material);
+      }
+
+      shape.fill({ x0: 1, x1: x - 1, y0: 4, y1: 8, z0: 2, z1: z - 2 }, material);
+
+      // Открытый грузовой кузов с низким полом и тремя бортами.
+      shape.fill({ x0: 1, x1: 23, y0: 8, y1: 9, z0: 2, z1: z - 2 }, material);
+      shape.fill({ x0: 1, x1: 23, y0: 9, y1: 12, z0: 1, z1: 3 }, material);
+      shape.fill({ x0: 1, x1: 23, y0: 9, y1: 12, z0: z - 3, z1: z - 1 }, material);
+      shape.fill({ x0: 1, x1: 3, y0: 9, y1: 12, z0: 2, z1: z - 2 }, material);
+
+      addVehicleCabin(shape, material, 23, 38, 7, y, 3, z - 3);
+
+      // Капот.
+      shape.fill({ x0: 38, x1: x - 1, y0: 7, y1: 11, z0: 2, z1: z - 2 }, material);
+      break;
+    }
+
+    case 'boat': {
+      // Низ корпуса: узкий киль.
+      shape.fill({ x0: 2, x1: 39, y0: 0, y1: 2, z0: 8, z1: 14 }, material);
+
+      // Корма широкая, к носу корпус ступенчато сужается.
+      shape.fill({ x0: 1, x1: 30, y0: 2, y1: 5, z0: 4, z1: 18 }, material);
+      shape.fill({ x0: 30, x1: 39, y0: 2, y1: 5, z0: 5, z1: 17 }, material);
+      shape.fill({ x0: 39, x1: 45, y0: 2, y1: 5, z0: 7, z1: 15 }, material);
+      shape.fill({ x0: 45, x1: 49, y0: 3, y1: 6, z0: 9, z1: 13 }, material);
+      shape.fill({ x0: 49, x1: 52, y0: 4, y1: 7, z0: 10, z1: 12 }, material);
+
+      // Верхние борта повторяют тот же клиновидный нос.
+      shape.fill({ x0: 0, x1: 31, y0: 5, y1: 8, z0: 2, z1: 20 }, material);
+      shape.fill({ x0: 31, x1: 40, y0: 5, y1: 8, z0: 4, z1: 18 }, material);
+      shape.fill({ x0: 40, x1: 46, y0: 5, y1: 8, z0: 6, z1: 16 }, material);
+      shape.fill({ x0: 46, x1: 50, y0: 6, y1: 9, z0: 8, z1: 14 }, material);
+      shape.fill({ x0: 50, x1: 52, y0: 7, y1: 10, z0: 10, z1: 12 }, material);
+
+      // Палуба не доходит до самого носа.
+      shape.fill({ x0: 2, x1: 43, y0: 8, y1: 9, z0: 3, z1: 19 }, material);
+
+      // Небольшая рубка ближе к корме.
+      addVehicleCabin(shape, material, 8, 24, 8, y - 2, 6, z - 6);
+      break;
+    }
+
+    case 'excavator': {
+      // Две отдельные гусеницы.
+      shape.fill({ x0: 2, x1: 47, y0: 0, y1: 6, z0: 1, z1: 6 }, material);
+      shape.fill({ x0: 2, x1: 47, y0: 0, y1: 6, z0: z - 6, z1: z - 1 }, material);
+
+      // Шасси связывает гусеницы.
+      shape.fill({ x0: 8, x1: 42, y0: 4, y1: 9, z0: 5, z1: z - 5 }, material);
+
+      // Противовес и моторный отсек сзади.
+      shape.fill({ x0: 3, x1: 22, y0: 9, y1: 18, z0: 6, z1: z - 6 }, material);
+
+      // Кабина сбоку.
+      addVehicleCabin(shape, material, 18, 35, 10, 27, 3, 15);
+
+      // Центральный шарнир.
+      shape.fill({ x0: 29, x1: 36, y0: 13, y1: 20, z0: 10, z1: 18 }, material);
+
+      // Ступенчатая стрела.
+      shape.fill({ x0: 34, x1: 42, y0: 18, y1: 22, z0: 11, z1: 17 }, material);
+      shape.fill({ x0: 40, x1: 48, y0: 20, y1: 24, z0: 11, z1: 17 }, material);
+      shape.fill({ x0: 46, x1: 52, y0: 14, y1: 22, z0: 11, z1: 17 }, material);
+
+      // Ковш впереди и ниже стрелы.
+      shape.fill({ x0: 50, x1: x, y0: 7, y1: 15, z0: 8, z1: 20 }, material);
+      shape.fill({ x0: 48, x1: x, y0: 7, y1: 10, z0: 6, z1: 22 }, material);
+      break;
+    }
+
+    case 'bulldozer': {
+      // Гусеницы с большим пустым промежутком между ними.
+      shape.fill({ x0: 3, x1: 50, y0: 0, y1: 7, z0: 1, z1: 7 }, material);
+      shape.fill({ x0: 3, x1: 50, y0: 0, y1: 7, z0: z - 7, z1: z - 1 }, material);
+
+      // Рама.
+      shape.fill({ x0: 8, x1: 49, y0: 4, y1: 9, z0: 6, z1: z - 6 }, material);
+
+      // Кабина сзади.
+      addVehicleCabin(shape, material, 9, 29, 8, 24, 7, z - 7);
+
+      // Низкий моторный отсек перед кабиной.
+      shape.fill({ x0: 29, x1: 50, y0: 8, y1: 14, z0: 8, z1: z - 8 }, material);
+
+      // Две тяги отвала.
+      shape.fill({ x0: 47, x1: 56, y0: 5, y1: 9, z0: 5, z1: 10 }, material);
+      shape.fill({ x0: 47, x1: 56, y0: 5, y1: 9, z0: z - 10, z1: z - 5 }, material);
+
+      // Сам отвал — тонкая широкая пластина впереди машины.
+      shape.fill({ x0: 55, x1: x, y0: 2, y1: 14, z0: 1, z1: z - 1 }, material);
+      break;
+    }
+  }
+}
+
 /**
  * Управляемая техника.
  *
@@ -187,22 +347,8 @@ export class Vehicle {
       grounded: false,
       name: `${kind}-hull`,
     });
-    // Корпус полый: сплошной металлический параллелепипед размером
-    // с пикап весил бы сто тонн и продавливал набережную одним фактом
-    // своего существования.
-    const wall = 2;
-    shape.fill({}, this.spec.material);
-    shape.fill(
-      { x0: wall, x1: x - wall, y0: wall, y1: y - wall, z0: wall, z1: z - wall },
-      Mat.Air,
-    );
-    // Рама по низу: без неё корпус разваливается от первого же удара.
-    shape.fill({ y0: 0, y1: wall + 1 }, this.spec.material);
-    // Кабина из стекла — узнаваемый силуэт и повод для дробовика.
-    shape.fill(
-      { x0: Math.floor(x * 0.45), x1: Math.floor(x * 0.75), y0: y - 4, y1: y, z0: 2, z1: z - 2 },
-      Mat.Glass,
-    );
+    buildVehicleHull(shape, kind, this.spec.material);
+
     // Центрируем корпус относительно точки позиции.
     shape.transform = {
       position: v3((-x / 2) * this.voxelSize, 0, (-z / 2) * this.voxelSize),
@@ -380,7 +526,11 @@ export class Vehicle {
     // а таран при этом резал бы воксели в метре перед собой — машина
     // вставала бы, ничего не пробив.
     const half = (this.spec.size.x / 2) * this.voxelSize;
-    const probe = add(next, scale(this.forward, half + PROBE_MARGIN));
+    // Проверяем препятствие со стороны фактического движения.
+    // При заднем ходе щуп должен быть у заднего бампера, иначе стена
+    // перед носом не даёт машине отъехать от неё.
+    const motionDir = this.speed < 0 ? scale(this.forward, -1) : this.forward;
+    const probe = add(next, scale(motionDir, half + PROBE_MARGIN));
     const r = PROBE_HALF;
     const box = {
       min: v3(probe.x - r, probe.y + 0.15, probe.z - r),
@@ -395,7 +545,7 @@ export class Vehicle {
    */
   private punchThrough(sim: Simulation, input: VehicleInput, dt: number): boolean {
     const speed = Math.abs(this.speed);
-    const useBlade = input.blade && this.spec.blade;
+    const useBlade = input.blade && this.spec.blade && this.speed >= 0;
     if (!useBlade && speed < this.spec.ramSpeed) return false;
 
     const blade = this.spec.blade;
@@ -406,14 +556,29 @@ export class Vehicle {
     const halfH = useBlade ? blade!.halfHeight : (this.spec.size.y / 2) * this.voxelSize;
     const reach = useBlade ? blade!.reach : clamp(speed * 0.06, 0.15, 0.9);
 
-    const center = add(this.nose, scale(this.forward, reach * 0.5));
+    const direction = scale(this.forward, this.speed < 0 ? -1 : 1);
+    const bumper = add(this.position, scale(direction, this.spec.size.x * this.voxelSize / 2));
+    const center = add(bumper, scale(direction, reach * 0.5));
+    const impact = v3(center.x, center.y + halfH, center.z);
+    const side = v3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    // Скруглённый скол должен очищать не только центр, но и весь щуп:
+    // иначе верхние углы проёма снова останавливают машину.
+    const radius = Math.hypot(halfH, PROBE_HALF) + this.voxelSize * 0.5;
+    const span = Math.max(0, halfW - radius);
+    const ignore = new Set([this.body.id]);
+    for (const body of sim.world.bodies.values()) {
+      if (body.tags.has('carved-debris')) ignore.add(body.id);
+    }
     const res = carve(
       sim.world,
-      {
-        kind: 'box',
-        center: v3(center.x, center.y + halfH, center.z),
-        halfExtents: v3(reach, halfH, halfW),
-        rotation: this.orientation,
+      useBlade ? {
+        kind: 'box', center: impact,
+        halfExtents: v3(reach, halfH, halfW), rotation: this.orientation,
+      } : {
+        kind: 'capsule',
+        a: add(impact, scale(side, -span)),
+        b: add(impact, scale(side, span)),
+        radius,
       },
       {
         power,
@@ -421,15 +586,19 @@ export class Vehicle {
         instant: true,
         falloff: 'none',
         cause: useBlade ? 'blade' : 'ram',
-        ignoreBodies: new Set([this.body.id]),
+        ignoreBodies: ignore,
+        physicalDebris: useBlade ? undefined : {
+          velocity: add(scale(direction, speed * 0.3), v3(0, 1.5, 0)),
+        },
       },
     );
 
     if (res.removed === 0) return false;
     // Удар о стену гасит скорость, но не останавливает намертво.
+    const next = add(this.position, scale(this.forward, this.speed * dt));
     this.speed *= useBlade ? 0.85 : 0.7;
-    void dt;
-    return true;
+    // Снятая древесина рядом со сталью ещё не означает свободный проход.
+    return !this.probeBlocked(sim, next);
   }
 
   /** Ковш: расчистка завала на месте. */
@@ -482,7 +651,13 @@ function scanIgnoring(
   ignore: ReadonlySet<number>,
 ): boolean {
   const hidden: Body[] = [];
-  for (const id of ignore) {
+  // Мелкие выбитые куски толкает физика. Они не блокируют щуп и не
+  // превращаются повторно в новые обломки от того же бампера.
+  const ignored = new Set(ignore);
+  for (const body of sim.world.bodies.values()) {
+    if (body.tags.has('carved-debris')) ignored.add(body.id);
+  }
+  for (const id of ignored) {
     const b = sim.world.bodies.get(id);
     if (b && !b.destroyed) {
       hidden.push(b);

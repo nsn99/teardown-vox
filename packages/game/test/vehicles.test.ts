@@ -133,6 +133,35 @@ describe('взаимодействие с вокселями', () => {
     expect(v.position.z).toBeLessThan(-25);
   });
 
+  it('таран кирпича оставляет неровный край, а не прямоугольный проём', () => {
+    const sim = emptySim();
+    const wall = addWall(sim, -25, Mat.Brick);
+    const v = new Vehicle('pickup', { position: v3(0, 0.1, 0) });
+    v.spawn(sim);
+
+    run(v, sim, drive({ throttle: 1 }), 4);
+
+    const shape = wall.shapes[0];
+    const removedWidths: number[] = [];
+
+    for (let y = 0; y < shape.sy; y++) {
+      let removedColumns = 0;
+      for (let x = 0; x < shape.sx; x++) {
+        let cut = false;
+        for (let z = 0; z < shape.sz; z++) {
+          if (shape.get(x, y, z) === Mat.Air) {
+            cut = true;
+            break;
+          }
+        }
+        if (cut) removedColumns++;
+      }
+      if (removedColumns > 0) removedWidths.push(removedColumns);
+    }
+
+    expect(new Set(removedWidths).size).toBeGreaterThan(2);
+  });
+
   it('без разгона в ту же стену упирается', () => {
     const sim = emptySim();
     const wall = addWall(sim, -4, Mat.Brick);
@@ -152,6 +181,19 @@ describe('взаимодействие с вокселями', () => {
     v.spawn(sim);
     run(v, sim, drive({ throttle: 0.1 }), 3);
     expect(wall.solidVoxels).toBe(before);
+  });
+
+  it('может отъехать назад от препятствия перед носом', () => {
+    const sim = emptySim();
+    addWall(sim, -2, Mat.Brick);
+
+    const v = new Vehicle('car', { position: v3(0, 0.1, 0) });
+    v.spawn(sim);
+
+    run(v, sim, drive({ throttle: -1 }), 2);
+
+    expect(v.speed).toBeLessThan(-1);
+    expect(v.position.z).toBeGreaterThan(1);
   });
 
   it('стальную стену легковая не пробивает даже на скорости', () => {
@@ -269,5 +311,20 @@ describe('вода', () => {
     car.spawn(sim);
     run(car, sim, drive({ throttle: 1 }), 3);
     expect(car.wrecked).toBe(false);
+  });
+});
+
+describe('силуэт техники', () => {
+  it('корпус не заполняет верхние углы габаритного бокса', () => {
+    for (const kind of Object.keys(VEHICLES) as (keyof typeof VEHICLES)[]) {
+      const v = new Vehicle(kind, { position: v3(0, 0.1, 0), voxelSize: VS });
+      const shape = v.body.shapes[0];
+      const y = shape.sy - 1;
+
+      expect(shape.get(0, y, 0), kind).toBe(Mat.Air);
+      expect(shape.get(0, y, shape.sz - 1), kind).toBe(Mat.Air);
+      expect(shape.get(shape.sx - 1, y, 0), kind).toBe(Mat.Air);
+      expect(shape.get(shape.sx - 1, y, shape.sz - 1), kind).toBe(Mat.Air);
+    }
   });
 });
