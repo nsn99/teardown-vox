@@ -50,7 +50,7 @@ export type Vec3Doc = [number, number, number];
 
 export type OpDoc =
   /** Залить коробку материалом. Пустой список коробки — вся форма. */
-  | { op: 'fill'; box?: BoxDoc; mat: string }
+  | { op: 'fill'; box?: BoxDoc; mat: string; color?: string }
   /** Коробка здания: стены, пол, крыша, внутри пусто. */
   | {
       op: 'hollow';
@@ -76,7 +76,7 @@ export type OpDoc =
    * Повторить коробку с шагом по осям: сваи причала, колонны, окна.
    * Шаг больше области — ровно один ряд, это законный и частый случай.
    */
-  | { op: 'grid'; box: BoxDoc; cell: Vec3Doc; step: Vec3Doc; mat: string }
+  | { op: 'grid'; box: BoxDoc; cell: Vec3Doc; step: Vec3Doc; mat: string; color?: string }
   /** Ломаная линия толщиной в воксель — кабель сигнализации. */
   | { op: 'line'; points: Vec3Doc[]; mat: string }
   /** Сырые воксели: сюда попадает импорт из чужих форматов. */
@@ -268,6 +268,12 @@ function matName(v: unknown, path: string): string {
   return str(v, path);
 }
 
+function hexColor(v: unknown, path: string): string {
+  const color = str(v, path);
+  if (!HEX_COLOR.test(color)) fail(path, `цвет пишется как #rrggbb, пришло «${color}»`);
+  return color;
+}
+
 function show(v: unknown): string {
   if (typeof v === 'string') return `«${v}»`;
   if (v === undefined) return 'ничего';
@@ -284,6 +290,7 @@ function parseOp(v: unknown, path: string): OpDoc {
         op: 'fill',
         mat: matName(o.mat, `${path}.mat`),
         ...(o.box === undefined ? {} : { box: box(o.box, `${path}.box`) }),
+        ...(o.color === undefined ? {} : { color: hexColor(o.color, `${path}.color`) }),
       };
     case 'hollow':
       return {
@@ -321,6 +328,7 @@ function parseOp(v: unknown, path: string): OpDoc {
         cell,
         step,
         mat: matName(o.mat, `${path}.mat`),
+        ...(o.color === undefined ? {} : { color: hexColor(o.color, `${path}.color`) }),
       };
     }
     case 'line': {
@@ -669,10 +677,24 @@ function region(shape: VoxelShape, b?: BoxDoc) {
     : { x0: 0, y0: 0, z0: 0, x1: shape.sx, y1: shape.sy, z1: shape.sz };
 }
 
+/** Окраска меняет вид, а не материал. Воздух и клетки за границей не красим. */
+function fillColored(shape: VoxelShape, r: ReturnType<typeof region>, material: Mat, color?: string): void {
+  shape.fill(r, material);
+  if (color === undefined || material === Mat.Air) return;
+  const rgb = 0x1000000 | parseInt(color.slice(1), 16);
+  for (let y = Math.max(0, r.y0); y < Math.min(shape.sy, r.y1); y++) {
+    for (let z = Math.max(0, r.z0); z < Math.min(shape.sz, r.z1); z++) {
+      for (let x = Math.max(0, r.x0); x < Math.min(shape.sx, r.x1); x++) {
+        shape.paint.set(shape.idx(x, y, z), rgb);
+      }
+    }
+  }
+}
+
 function applyOp(shape: VoxelShape, op: OpDoc, path: string): void {
   switch (op.op) {
     case 'fill':
-      shape.fill(region(shape, op.box), mat(op.mat, `${path}.mat`));
+      fillColored(shape, region(shape, op.box), mat(op.mat, `${path}.mat`), op.color);
       return;
     case 'hollow': {
       const r = region(shape, op.box);
@@ -720,7 +742,7 @@ function applyOp(shape: VoxelShape, op: OpDoc, path: string): void {
       for (let y = y0; y < y1; y += dy) {
         for (let z = z0; z < z1; z += dz) {
           for (let x = x0; x < x1; x += dx) {
-            shape.fill({ x0: x, y0: y, z0: z, x1: x + cx, y1: y + cy, z1: z + cz }, m);
+            fillColored(shape, { x0: x, y0: y, z0: z, x1: x + cx, y1: y + cy, z1: z + cz }, m, op.color);
           }
         }
       }

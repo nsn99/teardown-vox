@@ -282,25 +282,49 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
     }
 
     case 'bulldozer': {
-      // Гусеницы с большим пустым промежутком между ними.
-      shape.fill({ x0: 3, x1: 50, y0: 0, y1: 7, z0: 1, z1: 7 }, material);
-      shape.fill({ x0: 3, x1: 50, y0: 0, y1: 7, z0: z - 7, z1: z - 1 }, material);
+      // Две низкие гусеницы со скошенными концами, а не общий нижний бокс.
+      for (const z0 of [1, z - 8]) {
+        const z1 = z0 + 7;
+        shape.fill({ x0: 9, x1: 43, y0: 0, y1: 8, z0, z1 }, material);
+        shape.fill({ x0: 5, x1: 9, y0: 2, y1: 7, z0, z1 }, material);
+        shape.fill({ x0: 43, x1: 48, y0: 2, y1: 7, z0, z1 }, material);
+        shape.fill({ x0: 3, x1: 5, y0: 4, y1: 6, z0, z1 }, material);
+        shape.fill({ x0: 48, x1: 50, y0: 4, y1: 6, z0, z1 }, material);
+      }
 
-      // Рама.
-      shape.fill({ x0: 8, x1: 49, y0: 4, y1: 9, z0: 6, z1: z - 6 }, material);
+      // Узкая рама, высокая кабина и низкий капот читаются по отдельности.
+      shape.fill({ x0: 8, x1: 44, y0: 5, y1: 11, z0: 8, z1: z - 8 }, material);
+      shape.fill({ x0: 5, x1: 9, y0: 8, y1: 13, z0: 9, z1: z - 9 }, material);
+      addVehicleCabin(shape, material, 7, 25, 10, y - 1, 10, z - 10);
+      shape.fill({ x0: 6, x1: 26, y0: y - 1, y1: y, z0: 9, z1: z - 9 }, material);
+      shape.fill({ x0: 25, x1: 43, y0: 9, y1: 15, z0: 10, z1: z - 10 }, material);
+      shape.fill({ x0: 28, x1: 39, y0: 15, y1: 16, z0: 11, z1: z - 11 }, material);
+      // Выхлопная труба над капотом.
+      shape.fill({ x0: 32, x1: 34, y0: 16, y1: 23, z0: 10, z1: 12 }, material);
 
-      // Кабина сзади.
-      addVehicleCabin(shape, material, 9, 29, 8, 24, 7, z - 7);
+      // Отвал вынесен вперёд на двух тягах; между ним и капотом виден воздух.
+      shape.fill({ x0: 43, x1: 57, y0: 5, y1: 8, z0: 5, z1: 9 }, material);
+      shape.fill({ x0: 43, x1: 57, y0: 5, y1: 8, z0: z - 9, z1: z - 5 }, material);
+      // Наклонная поверхность и загнутые края отвала.
+      for (let by = 3; by < 14; by++) for (let bz = 1; bz < z - 1; bz++) {
+        const edge = bz < 4 || bz >= z - 4 ? 1 : 0;
+        const bx = 57 - Math.floor((by - 3) / 4) + edge;
+        shape.fill({ x0: bx, x1: bx + 2, y0: by, y1: by + 1, z0: bz, z1: bz + 1 }, material);
+      }
+      shape.fill({ x0: 57, x1: x, y0: 1, y1: 3, z0: 0, z1: z }, material);
 
-      // Низкий моторный отсек перед кабиной.
-      shape.fill({ x0: 29, x1: 50, y0: 8, y1: 14, z0: 8, z1: z - 8 }, material);
-
-      // Две тяги отвала.
-      shape.fill({ x0: 47, x1: 56, y0: 5, y1: 9, z0: 5, z1: 10 }, material);
-      shape.fill({ x0: 47, x1: 56, y0: 5, y1: 9, z0: z - 10, z1: z - 5 }, material);
-
-      // Сам отвал — тонкая широкая пластина впереди машины.
-      shape.fill({ x0: 55, x1: x, y0: 2, y1: 14, z0: 1, z1: z - 1 }, material);
+      // Цвет не меняет прочность: корпус и гусеницы остаются тяжёлой сталью.
+      // Старый одинаково серый материал скрадывал детали даже у нового силуэта.
+      for (let by = 0; by < y; by++) for (let bz = 0; bz < z; bz++) for (let bx = 0; bx < x; bx++) {
+        const index = shape.idx(bx, by, bz);
+        if (shape.data[index] === Mat.Air || shape.data[index] === Mat.Glass) continue;
+        const track = by < 8 && bx < 51 && (bz < 8 || bz >= z - 8);
+        const exhaust = bx >= 32 && bx < 34 && by >= 16 && bz >= 10 && bz < 12;
+        const color = track ? (bx % 4 === 0 ? 0x59616a : 0x252b31)
+          : exhaust ? 0x353b42 : bx >= 54 ? 0xa6b0ba : 0xe9b438;
+        // Маркер RGB: маленькие значения paint зарезервированы под палитру баллончика.
+        shape.paint.set(index, 0x1000000 | color);
+      }
       break;
     }
   }

@@ -315,6 +315,34 @@ describe('вода', () => {
 });
 
 describe('силуэт техники', () => {
+  it('у бульдозера раздельные гусеницы, высокая кабина и наклонный отвал', () => {
+    const v = new Vehicle('bulldozer', { position: v3(0, 0.1, 0) });
+    const shape = v.body.shapes[0];
+    expect(shape.get(20, 2, 4)).toBe(Mat.HeavyMetal);
+    expect(shape.get(20, 2, 29)).toBe(Mat.HeavyMetal);
+    expect(shape.get(20, 2, 17)).toBe(Mat.Air);
+    expect(shape.get(4, 1, 4)).toBe(Mat.Air);
+    expect(shape.get(4, 5, 4)).toBe(Mat.HeavyMetal);
+    expect(shape.get(16, 25, 17)).toBe(Mat.HeavyMetal);
+    expect(shape.get(34, 20, 17)).toBe(Mat.Air);
+    expect(shape.get(24, 18, 17)).toBe(Mat.Glass);
+    expect(shape.get(51, 10, 17)).toBe(Mat.Air);
+    expect(shape.get(57, 3, 17)).toBe(Mat.HeavyMetal);
+    expect(shape.get(55, 13, 17)).toBe(Mat.HeavyMetal);
+    expect(shape.get(57, 13, 17)).toBe(Mat.Air);
+  });
+
+  it('окраска различает части бульдозера и сохраняет сталь и стекло', () => {
+    const v = new Vehicle('bulldozer', { position: v3(0, 0.1, 0) });
+    const shape = v.body.shapes[0];
+    const colors = [shape.idx(20, 2, 4), shape.idx(16, 25, 17), shape.idx(57, 3, 17)]
+      .map(i => shape.paint.get(i)!);
+    expect(new Set(colors).size).toBe(3);
+    expect(colors.every(c => c >= 0x1000000)).toBe(true);
+    expect(shape.paint.has(shape.idx(24, 18, 17))).toBe(false);
+    expect([...shape.data].every(m => m === Mat.Air || m === Mat.HeavyMetal || m === Mat.Glass)).toBe(true);
+  });
+
   it('корпус не заполняет верхние углы габаритного бокса', () => {
     for (const kind of Object.keys(VEHICLES) as (keyof typeof VEHICLES)[]) {
       const v = new Vehicle(kind, { position: v3(0, 0.1, 0), voxelSize: VS });

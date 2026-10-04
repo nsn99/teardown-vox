@@ -80,12 +80,17 @@ describe('карта M: порт', () => {
     const level = bodies[0];
     expect(level.shapes.map((s) => s.name)).toEqual([
       'ground',
+      'harbour-bed',
+      'vehicle-yard-east',
+      'vehicle-yard-south',
       'warehouse',
       'office',
       'crane',
       'pier',
       'containers',
       'fence',
+      'fence-west',
+      'fence-east',
     ]);
     expect(level.solidVoxels).toBeGreaterThan(100_000);
   });

@@ -124,6 +124,44 @@ describe('формат карты', () => {
     expect(shape.solidVoxels).toBe(1);
   });
 
+  it('цвет заливки и сетки сохраняет материал и обрезается по границе формы', () => {
+    const doc = tinyDoc();
+    doc.volumes[0].size = [4, 3, 4];
+    doc.volumes[0].ops = [
+      { op: 'fill', box: [-1, 0, -1, 5, 3, 5], mat: 'metal', color: '#123456' },
+      { op: 'fill', box: [1, 1, 1, 3, 3, 3], mat: 'air', color: '#ffffff' },
+      { op: 'grid', box: [0, 0, 0, 4, 3, 4], cell: [1, 1, 1], step: [2, 2, 2], mat: 'metal', color: '#aabbcc' },
+    ];
+    const parsed = parseLevelDoc(JSON.stringify(doc));
+    const shape = buildVolume(parsed.volumes[0], 0.1);
+    expect(shape.get(0, 0, 0)).toBe(Mat.Metal);
+    expect(shape.paint.get(shape.idx(0, 0, 0))).toBe(0x1aabbcc);
+    expect(shape.paint.get(shape.idx(1, 0, 1))).toBe(0x1123456);
+    expect(shape.get(1, 1, 1)).toBe(Mat.Air);
+    expect(shape.paint.has(shape.idx(1, 1, 1))).toBe(false);
+    for (const index of shape.paint.keys()) {
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(shape.data.length);
+      expect(shape.data[index]).not.toBe(Mat.Air);
+    }
+  });
+
+  it('снимок карты сохраняет окраску заливок и сеток', () => {
+    const doc = tinyDoc();
+    doc.volumes[0].ops = [
+      { op: 'fill', box: [0, 0, 0, 4, 4, 4], mat: 'metal', color: '#000000' },
+      { op: 'grid', box: [0, 0, 0, 4, 4, 4], cell: [1, 4, 1], step: [2, 10, 2], mat: 'metal', color: '#abcdef' },
+    ];
+    const level = levelFromDoc(doc);
+    const sim = new Simulation();
+    const before = level.build(sim)[0].shapes[0];
+    const snapshot = docFromLevel(level, sim);
+    const restored = levelFromDoc(JSON.stringify(snapshot)).build(new Simulation())[0].shapes[0];
+    expect(restored.data).toEqual(before.data);
+    expect(restored.paint).toEqual(before.paint);
+    expect(restored.paint.get(restored.idx(1, 1, 1))).toBe(0x1000000);
+  });
+
   it('карта из файла совпадает с картой из кода воксель в воксель', () => {
     const a = new Simulation();
     const fromCode = portLevel.build(a);
@@ -219,6 +257,22 @@ describe('формат карты: ошибки называют поле', () =
         ];
       }),
       path: 'volumes[0].ops[0].mat',
+    },
+    {
+      name: 'неверный цвет заливки',
+      input: broken((d) => {
+        (d.volumes as Array<{ ops: unknown[] }>)[0].ops = [{ op: 'fill', mat: 'metal', color: 'red' }];
+      }),
+      path: 'volumes[0].ops[0].color',
+    },
+    {
+      name: 'неверный цвет сетки',
+      input: broken((d) => {
+        (d.volumes as Array<{ ops: unknown[] }>)[0].ops = [
+          { op: 'grid', box: [0, 0, 0, 4, 4, 4], cell: [1, 1, 1], step: [2, 2, 2], mat: 'metal', color: '#gg1122' },
+        ];
+      }),
+      path: 'volumes[0].ops[0].color',
     },
     {
       name: 'неизвестная операция',
