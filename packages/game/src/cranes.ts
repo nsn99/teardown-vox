@@ -37,6 +37,7 @@ export class PortCrane {
   private ropeRows: number;
   private stayRows = 0;
   private cabIndex: number;
+  private gripVoxel: Vec3;
   private payload?: { body: Body; offset: Vec3; rotation: Quat; previous: Vec3 };
 
   constructor(private sim: Simulation, readonly def: CraneDef) {
@@ -48,6 +49,10 @@ export class PortCrane {
     this.base = { body: baseBody, shape: baseShape, indices: def.base.anchors.map(p => baseShape.idx(p.x, p.y, p.z)) };
     this.parts = [def.house, def.boom, def.hook].map(p => this.mountPart(p));
     [this.house, this.boom, this.hook] = this.parts.map(p => p.body);
+    const hookShape = this.parts[2].shape;
+    const grip = inverseTransformPoint(hookShape.transform, v3(0.05, -1.3, 0));
+    this.gripVoxel = v3(Math.floor(grip.x / hookShape.voxelSize), Math.floor(grip.y / hookShape.voxelSize),
+      Math.floor(grip.z / hookShape.voxelSize));
     this.boomSupport = def.boom.support.map(p => this.parts[0].shape.idx(p.x, p.y, p.z));
     const cab = inverseTransformPoint(this.parts[0].shape.transform, sub(def.cab.control, def.house.pivot));
     const vs = this.parts[0].shape.voxelSize;
@@ -96,7 +101,10 @@ export class PortCrane {
   get operable(): boolean {
     return this.alive(this.house) && this.parts[0].shape.data[this.cabIndex] !== Mat.Air;
   }
-  get hoistIntact(): boolean { return this.alive(this.boom) && this.alive(this.hook) && this.liveColumns.size > 0; }
+  get hoistIntact(): boolean {
+    return this.alive(this.boom) && this.alive(this.hook) && this.liveColumns.size > 0 &&
+      this.parts[2].shape.get(this.gripVoxel.x, this.gripVoxel.y, this.gripVoxel.z) !== Mat.Air;
+  }
   get load(): Body | null { return this.payload?.body ?? null; }
   get seat(): Vec3 { return transformPoint(this.house.transform, sub(this.def.cab.seat, this.def.house.pivot)); }
   get exit(): Vec3 { return transformPoint(this.house.transform, sub(this.def.cab.exit, this.def.house.pivot)); }
@@ -124,7 +132,7 @@ export class PortCrane {
       return;
     }
     this.pose();
-    if (this.hoistIntact && this.obstructed()) {
+    if (this.alive(this.hook) && this.obstructed()) {
       this.blocked = true;
       this.yaw = old.yaw; this.angle = old.angle; this.ropeLength = old.length;
       this.pose();

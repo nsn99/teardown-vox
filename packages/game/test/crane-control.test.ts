@@ -150,6 +150,18 @@ describe('управление портовым краном', () => {
     expect(h.operatingId).toBeNull();
   });
 
+  it('оторванный крюк оставляет подвесной блок, но захват в пустом месте отключён', () => {
+    const c = scene();
+    const charges = new ChargeSystem({ fuse: Infinity });
+    const inventory = new Inventory({ unlimited: true }); inventory.select('explosive');
+    expect(charges.place({ sim: h.sim, inventory, origin: v3(31.8, 3.9, -5.8), direction: v3(0, 0, 1) })).not.toBeNull();
+    expect(charges.detonateAll(h.sim)).toBe(1);
+    c.update(NEUTRAL_CRANE_INPUT, 0);
+    expect(c.hook.kinematic).toBe(true);
+    expect(c.hoistIntact).toBe(false);
+    expect(c.toggleLoad()).toBe('broken');
+  });
+
   it('перезапуск возвращает исправный кран и не оставляет захваченный груз', () => {
     const c = scene();
     takeYardCrate(c);
