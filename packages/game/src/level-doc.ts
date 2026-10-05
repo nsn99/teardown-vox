@@ -15,6 +15,7 @@ import {
   Daylight,
   EnvironmentDef,
   EscapeRoute,
+  GateDef,
   LevelSource,
   LightDef,
   RouteNeeds,
@@ -102,6 +103,7 @@ export interface PropDoc {
   tags?: string[];
   /** Тело не участвует в разрушении и структурном анализе. */
   passive?: boolean;
+  kinematic?: boolean;
   volume: VolumeDoc;
 }
 
@@ -116,6 +118,9 @@ export type TriggerDoc = Omit<TriggerDef, 'center' | 'halfExtents'> & {
   halfExtents: Vec3Doc;
 };
 export type VehicleDoc = Omit<VehicleSpawnDef, 'position'> & { position: Vec3Doc };
+export type GateDoc = Omit<GateDef, 'support'> & {
+  support?: { volume: string; voxel: Vec3Doc };
+};
 export type TargetDoc = Omit<TargetSpec, 'position'> & { position: Vec3Doc };
 export type ChaserDoc = Omit<ChaserSpec, 'from'> & { from: Vec3Doc };
 export type LightDocEntry = Omit<LightDef, 'position' | 'target'> & {
@@ -146,6 +151,7 @@ export interface LevelDoc {
   props?: PropDoc[];
   triggers: TriggerDoc[];
   vehicles: VehicleDoc[];
+  gates?: GateDoc[];
   mission: MissionDoc;
   /** Кто приходит по концу таймера. Пусто — берутся умолчания. */
   pursuit?: ChaserDoc[];
@@ -165,6 +171,11 @@ export const triggersOf = (doc: LevelDoc): TriggerDef[] =>
 /** Техника документа в игровую. */
 export const vehiclesOf = (doc: LevelDoc): VehicleSpawnDef[] =>
   doc.vehicles.map((v) => ({ ...v, position: point(v.position) }));
+
+export const gatesOf = (doc: LevelDoc): GateDef[] =>
+  (doc.gates ?? []).map(({ support, ...g }) => ({ ...g, ...(support ? {
+    support: { volume: support.volume, voxel: point(support.voxel) },
+  } : {}) }));
 
 /** Миссия документа в игровую. */
 export const missionOf = (doc: LevelDoc): MissionConfig => ({
@@ -567,6 +578,29 @@ export function parseLevelDoc(input: unknown): LevelDoc {
   if (voxelSize <= 0) fail('voxelSize', `размер вокселя должен быть положительным, пришло ${voxelSize}`);
   const spawnRaw = isObj(o.spawn) ? (o.spawn as Record<string, unknown>) : fail('spawn', 'нет точки старта');
   const sp = vec3(spawnRaw.position, 'spawn.position');
+  const volumes = (o.volumes as unknown[]).map((v, i) => parseVolume(v, `volumes[${i}]`));
+  const props = Array.isArray(o.props)
+    ? (o.props as unknown[]).map((p, i) => parseProp(p, `props[${i}]`)) : [];
+  if (o.gates !== undefined && !Array.isArray(o.gates)) fail('gates', 'ожидался список ворот');
+  const gates = Array.isArray(o.gates) ? o.gates.map((g, i) => parseGate(g, `gates[${i}]`)) : undefined;
+  const gateIds = new Set<string>();
+  const gateBodies = new Set<string>();
+  for (const [i, gate] of (gates ?? []).entries()) {
+    if (gateIds.has(gate.id)) fail(`gates[${i}].id`, 'повторное имя ворот');
+    if (gateBodies.has(gate.body)) fail(`gates[${i}].body`, 'одна створка назначена двум воротам');
+    gateIds.add(gate.id); gateBodies.add(gate.body);
+    const matching = props.filter(p => p.name === gate.body);
+    if (matching.length !== 1 || matching[0].kind !== 'dynamic' || !matching[0].kinematic) {
+      fail(`gates[${i}].body`, 'створка должна ссылаться на одно динамическое кинематическое тело props');
+    }
+    if (gate.support) {
+      const frame = volumes.find(v => v.name === gate.support!.volume);
+      if (!frame) fail(`gates[${i}].support.volume`, 'нет объёма рамы');
+      if (gate.support.voxel.some((n, axis) => !Number.isInteger(n) || n < 0 || n >= frame.size[axis])) {
+        fail(`gates[${i}].support.voxel`, 'крепление вне рамы или не в целых вокселях');
+      }
+    }
+  }
 
   return {
     format: LEVEL_FORMAT,
@@ -577,16 +611,15 @@ export function parseLevelDoc(input: unknown): LevelDoc {
     voxelSize,
     waterLevel: num(o.waterLevel, 'waterLevel'),
     spawn: { position: sp, yaw: num(spawnRaw.yaw, 'spawn.yaw') },
-    volumes: (o.volumes as unknown[]).map((v, i) => parseVolume(v, `volumes[${i}]`)),
-    props: Array.isArray(o.props)
-      ? (o.props as unknown[]).map((p, i) => parseProp(p, `props[${i}]`))
-      : [],
+    volumes,
+    props,
     triggers: Array.isArray(o.triggers)
       ? (o.triggers as unknown[]).map((t, i) => parseTrigger(t, `triggers[${i}]`))
       : [],
     vehicles: Array.isArray(o.vehicles)
       ? (o.vehicles as unknown[]).map((v, i) => parseVehicle(v, `vehicles[${i}]`))
       : [],
+    ...(gates ? { gates } : {}),
     mission: parseMission(o.mission, 'mission'),
     ...(Array.isArray(o.pursuit)
       ? { pursuit: (o.pursuit as unknown[]).map((c, i) => parseChaser(c, `pursuit[${i}]`)) }
@@ -601,6 +634,27 @@ export function parseLevelDoc(input: unknown): LevelDoc {
 }
 
 const ROUTE_NEEDS: readonly RouteNeeds[] = ['foot', 'planks', 'vehicle', 'boat'];
+
+function parseGate(v: unknown, path: string): GateDoc {
+  if (!isObj(v)) fail(path, 'ожидался объект ворот');
+  const o = v as Record<string, unknown>;
+  const positive = (field: string): number => {
+    const n = num(o[field], `${path}.${field}`);
+    if (n <= 0) fail(`${path}.${field}`, 'ожидалось положительное число');
+    return n;
+  };
+  const closeDelay = num(o.closeDelay, `${path}.closeDelay`);
+  if (closeDelay < 0) fail(`${path}.closeDelay`, 'ожидалось неотрицательное число');
+  let support: GateDoc['support'];
+  if (o.support !== undefined) {
+    if (!isObj(o.support)) fail(`${path}.support`, 'ожидалось крепление к раме');
+    support = { volume: str(o.support.volume, `${path}.support.volume`),
+      voxel: vec3(o.support.voxel, `${path}.support.voxel`) };
+  }
+  return { id: str(o.id, `${path}.id`), body: str(o.body, `${path}.body`),
+    rise: positive('rise'), speed: positive('speed'), approachRadius: positive('approachRadius'),
+    closeDelay, ...(support ? { support } : {}) };
+}
 
 function parseRoute(v: unknown, path: string): RouteDoc {
   if (!isObj(v)) fail(path, `ожидался объект маршрута, пришло ${show(v)}`);
@@ -633,11 +687,16 @@ function parseRoute(v: unknown, path: string): RouteDoc {
 function parseProp(v: unknown, path: string): PropDoc {
   if (!isObj(v)) fail(path, `ожидался объект предмета, пришло ${show(v)}`);
   const o = v as Record<string, unknown>;
+  if (o.kinematic !== undefined && typeof o.kinematic !== 'boolean') {
+    fail(`${path}.kinematic`, 'ожидалось логическое значение');
+  }
+  if (o.kinematic === true && o.kind !== 'dynamic') fail(`${path}.kinematic`, 'кинематика требует kind: dynamic');
   return {
     name: str(o.name, `${path}.name`),
     kind: o.kind === 'dynamic' ? 'dynamic' : 'static',
     tags: Array.isArray(o.tags) ? (o.tags as unknown[]).map((t, i) => str(t, `${path}.tags[${i}]`)) : [],
     passive: Boolean(o.passive),
+    ...(o.kinematic === true ? { kinematic: true } : {}),
     volume: parseVolume(o.volume, `${path}.volume`),
   };
 }
@@ -851,6 +910,7 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
     spawn,
     triggers: triggersOf(doc),
     vehicles: vehiclesOf(doc),
+    ...(doc.gates ? { gates: gatesOf(doc) } : {}),
     mission,
     ...(doc.pursuit ? { pursuit: pursuitOf(doc)! } : {}),
     ...(doc.environment ? { environment: environmentOf(doc)! } : {}),
@@ -874,6 +934,7 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
           name: prop.name,
           tags: prop.tags ?? [],
           passive: prop.passive ?? false,
+          kinematic: prop.kinematic ?? false,
         });
         sim.world.addBody(body);
         out.push(body);
@@ -922,6 +983,7 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
         kind: b.kind,
         tags: [...b.tags],
         passive: b.passive,
+        ...(b.kinematic ? { kinematic: true } : {}),
         volume: snapshotVolume(s),
       })),
     );
@@ -946,6 +1008,9 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
       halfExtents: flat(t.halfExtents),
     })),
     vehicles: level.vehicles.map((v) => ({ ...v, position: flat(v.position) })),
+    ...(level.gates ? { gates: level.gates.map(({ support, ...g }) => ({ ...g, ...(support ? {
+      support: { volume: support.volume, voxel: flat(support.voxel) },
+    } : {}) })) } : {}),
     mission: {
       ...level.mission,
       targets: level.mission.targets.map((t) => ({ ...t, position: flat(t.position) })),

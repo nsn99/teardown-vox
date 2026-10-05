@@ -22,6 +22,18 @@ export interface VehicleSpawnDef {
   yaw?: number;
 }
 
+export interface GateDef {
+  id: string;
+  /** Имя отдельного кинематического тела створки. */
+  body: string;
+  rise: number;
+  speed: number;
+  approachRadius: number;
+  closeDelay: number;
+  /** Крепление к неподвижной раме: после разрушения створка падает. */
+  support?: { volume: string; voxel: Vec3 };
+}
+
 export interface SpawnPoint {
   position: Vec3;
   yaw: number;
@@ -101,6 +113,7 @@ export interface LevelSource {
   spawn: SpawnPoint;
   triggers: TriggerDef[];
   vehicles: VehicleSpawnDef[];
+  gates?: GateDef[];
   mission: MissionConfig;
   /** Кто приходит по концу таймера тревоги. Пусто — умолчания погони. */
   pursuit?: ChaserSpec[];

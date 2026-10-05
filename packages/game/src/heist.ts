@@ -21,6 +21,7 @@ import { Profile } from './progression.js';
 import { Pursuit } from './pursuit.js';
 import { ChargeSystem, PlankBuilder, ToolContext, ToolUseResult, useTool } from './tool-use.js';
 import { CARGO_OFFSET, NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
+import { AutomaticGate } from './gates.js';
 
 export interface HeistOptions {
   level: LevelSource;
@@ -91,6 +92,7 @@ export class Heist {
   readonly profile: Profile;
   readonly sandbox: boolean;
   readonly vehicles = new Map<string, Vehicle>();
+  readonly gates: AutomaticGate[] = [];
 
   /** Физические тела целей: id цели → тело в мире. */
   readonly targetBodies = new Map<string, Body>();
@@ -182,6 +184,7 @@ export class Heist {
     if (this.started) return;
     this.started = true;
     this.level.build(this.sim);
+    for (const def of this.level.gates ?? []) this.gates.push(new AutomaticGate(this.sim, def));
     for (const spawn of this.level.vehicles) {
       const veh = new Vehicle(spawn.kind, {
         position: spawn.position,
@@ -478,6 +481,8 @@ export class Heist {
     this.charges.step(this.sim, dt, this.protectedMaterials());
 
     const veh = this.driving;
+    const visitor = veh ? veh.body.aabb() : this.character.aabbAt(this.character.position);
+    for (const gate of this.gates) gate.update(visitor, dt);
     if (veh) {
       veh.update(this.sim, vehicleInput, dt);
       this.yaw = veh.yaw;
@@ -565,6 +570,7 @@ export class Heist {
     this.sim.reset();
     this.targetBodies.clear();
     this.vehicles.clear();
+    this.gates.length = 0;
     this.started = false;
     this.start();
   }

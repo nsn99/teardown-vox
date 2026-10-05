@@ -67,6 +67,7 @@ export class SimplePhysics implements PhysicsBackend {
     if (body.kind === 'dynamic') this.tracked.add(body);
     else this.tracked.delete(body);
     body.collidersDirty = false;
+    body.velocityDirty = false;
   }
 
   remove(body: Body): void {
@@ -187,6 +188,11 @@ export class SimplePhysics implements PhysicsBackend {
     const over = impulse - this.cfg.impactThreshold;
     const radius = Math.min(2.5, 0.15 + over * this.cfg.impactDamageScale);
     const power = Math.min(1.1, 0.25 + over * 3e-4);
+    if (body.tags.has('debris')) {
+      body.fractureOnImpact = true;
+      body.fracturePoint = { ...point };
+      body.fractureSpeed = impulse / Math.max(1e-3, body.mass());
+    }
 
     this.world.events.emit('impact', {
       body,
