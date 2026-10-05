@@ -109,6 +109,9 @@ describe('дым в симуляции', () => {
   function wall(): Simulation {
     const sim = new Simulation();
     const s = new VoxelShape({ sx: 60, sy: 40, sz: 20, voxelSize: 0.1, name: 'стена' });
+    // Проверяем дым одного взрыва. Обломки структурной стены могут
+    // упасть позже из-за бюджета CPU и снова поднять дым перед замером.
+    s.structural = false;
     s.fill({}, Mat.Brick);
     s.transform = { position: v3(0, 0, 0), rotation: { x: 0, y: 0, z: 0, w: 1 } };
     sim.world.addBody(new Body({ kind: 'static', shapes: [s], name: 'стена' }));
@@ -131,9 +134,9 @@ describe('дым в симуляции', () => {
   it('дым рассеивается по ходу симуляции', () => {
     const sim = wall();
     explode(sim.world, { center: v3(3, 2, 1), radius: 1.5, power: 1.4, cause: 'test' });
-    const before = sim.smoke.size;
+    expect(sim.smoke.size).toBeGreaterThan(0);
     for (let i = 0; i < 600; i++) sim.step(1 / 60);
-    expect(sim.smoke.size).toBeLessThan(before);
+    expect(sim.smoke.size).toBe(0);
   });
 
   it('рестарт уносит дым вместе с миром', () => {
