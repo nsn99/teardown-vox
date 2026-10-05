@@ -15,6 +15,7 @@ import { appendFileSync, mkdirSync, existsSync, readdirSync, writeFileSync } fro
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
+import { WAREHOUSE_LIGHT_PROBE } from './warehouse-light-probe.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
@@ -344,20 +345,46 @@ try {
     // Смотрим на пол: именно туда ляжет свет из дыры. Снимать крышу,
     // в которой эту дыру и пробили, бессмысленно — там меняется небо в
     // проёме, а не освещённость зала.
-    const atFloor = () => window.tvox.look(16, 1.7, 22, 0, -0.55);
-    await page.evaluate(atFloor);
+    const atFloor = ({ position: p, yaw, pitch }) => window.tvox.look(p.x, p.y, p.z, yaw, pitch);
+    await page.evaluate(atFloor, WAREHOUSE_LIGHT_PROBE);
     await settleMesh(page, 'склада');
-    const before = await meanLuminance(await page.screenshot({ type: 'png' }));
+    // Средняя по всему кадру смешивала пол с HUD, стенами и открытым
+    // проездом. Сравниваем одну и ту же область пола в центре кадра.
+    const floorClip = { x: 384, y: 210, width: 256, height: 200 };
+    const before = await meanLuminance(await page.screenshot({
+      path: join(outDir, '04-floor.png'), type: 'png', clip: floorClip,
+    }));
     await page.screenshot({ path: join(outDir, '04-inside.png') });
 
     const removed = await page.evaluate(() => {
-      window.tvox.look(16, 1.7, 22, 0, 0.95);
+      const h = window.tvox.heist;
+      const floor = h.sim.world.raycast(h.eye, h.aimDirection, { maxDistance: 20 });
+      if (floor?.shape.name !== 'warehouse' || floor.normal.y < 0.9) {
+        throw new Error('Замер света смотрит мимо пола склада');
+      }
+      const roof = h.sim.world.raycast(
+        { x: floor.point.x, y: h.eye.y, z: floor.point.z },
+        { x: 0, y: 1, z: 0 },
+        { maxDistance: 20 },
+      );
+      if (roof?.shape !== floor.shape || roof.point.y < 6) {
+        throw new Error('Над областью замера нет целой крыши склада');
+      }
+      // Дыра должна находиться над измеряемым полом. Фиксированный угол
+      // прицела зависел от высоты игрока и сдвигал пятно света в сторону.
+      const dx = roof.point.x - h.eye.x;
+      const dy = roof.point.y - h.eye.y;
+      const dz = roof.point.z - h.eye.z;
+      h.yaw = Math.atan2(-dx, -dz);
+      h.pitch = Math.atan2(dy, Math.hypot(dx, dz));
       return window.tvox.blast(3);
     });
     if (removed <= 0) throw new Error('Крыша не пробилась, светить нечему');
-    await page.evaluate(atFloor);
+    await page.evaluate(atFloor, WAREHOUSE_LIGHT_PROBE);
     await settleMesh(page, 'пробитой крыши');
-    const after = await meanLuminance(await page.screenshot({ type: 'png' }));
+    const after = await meanLuminance(await page.screenshot({
+      path: join(outDir, '05-floor-lit.png'), type: 'png', clip: floorClip,
+    }));
     await page.screenshot({ path: join(outDir, '05-inside-lit.png') });
 
     if (before < 0) {
@@ -365,7 +392,7 @@ try {
       return;
     }
     steps.push(
-      `внутри склада: средняя яркость ${before.toFixed(4)} → ${after.toFixed(4)} ` +
+      `пол склада: средняя яркость ${before.toFixed(4)} → ${after.toFixed(4)} ` +
         `после дыры в крыше`,
     );
     if (after <= before * 1.08) {

@@ -51,6 +51,12 @@ export class Body {
   sleeping = false;
   /** Секунд без движения. */
   restTime = 0;
+  /** Сильный удар: крупная оболочка должна расколоться, а не остаться жёстким зданием. */
+  fractureOnImpact = false;
+  fracturePoint: Vec3 = v3();
+  fractureSpeed = 0;
+  /** Структурное раскалывание изменило скорость уже созданного тела. */
+  velocityDirty = false;
   /** Помечено на удаление в конце шага. */
   destroyed = false;
 

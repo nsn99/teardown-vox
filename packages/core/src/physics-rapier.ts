@@ -73,6 +73,8 @@ interface Entry {
   lastImpulse: number;
   /** Потеря скорости за шаг, м/с. */
   lastSpeedDrop: number;
+  /** Число вокселей при последней полной синхронизации формы. */
+  shapeSolids: Map<number, number>;
 }
 
 /**
@@ -138,11 +140,33 @@ export class RapierPhysics implements PhysicsBackend {
       this.create(body);
       return;
     }
-    if (body.collidersDirty && !this.pendingIds.has(body.id)) {
-      this.pending.push(body);
-      this.pendingIds.add(body.id);
+    if (body.collidersDirty) {
+      // После отделения здания старые коллайдеры не должны продолжать
+      // держать его же обломок в воздухе. Резкое уменьшение формы требует
+      // немедленной синхронизации; обычные удары остаются в очереди.
+      const refitted = this.refitDetachedShapes(existing);
+      if (refitted && this.dirtyChunkCount(body) === 0) {
+        body.collidersDirty = false;
+      } else if (!this.pendingIds.has(body.id)) {
+        this.pending.push(body);
+        this.pendingIds.add(body.id);
+      }
+    }
+    const type = body.kind !== 'dynamic' ? this.RAPIER.RigidBodyType.Fixed : body.kinematic
+      ? this.RAPIER.RigidBodyType.KinematicPositionBased : this.RAPIER.RigidBodyType.Dynamic;
+    if (existing.rb.bodyType() !== type) {
+      existing.rb.setBodyType(type, true);
+      if (body.kind === 'dynamic' && !body.kinematic) {
+        existing.rb.setLinvel(body.velocity, true);
+        existing.rb.setAngvel(body.angularVelocity, true);
+      }
     }
     if (body.kind !== 'dynamic') return;
+    if (body.velocityDirty && !body.kinematic) {
+      existing.rb.setLinvel(body.velocity, true);
+      existing.rb.setAngvel(body.angularVelocity, true);
+      body.velocityDirty = false;
+    }
 
     const p = body.transform.position;
     if (body.kinematic) {
@@ -183,6 +207,7 @@ export class RapierPhysics implements PhysicsBackend {
       prevVelocity: v3(),
       lastImpulse: 0,
       lastSpeedDrop: 0,
+      shapeSolids: new Map(),
     };
     this.entries.set(body.id, entry);
     this.buildColliders(entry);
@@ -191,6 +216,7 @@ export class RapierPhysics implements PhysicsBackend {
       rb.setAngvel(body.angularVelocity, true);
     }
     body.physicsHandle = rb.handle;
+    body.velocityDirty = false;
     body.collidersDirty = false;
   }
 
@@ -206,7 +232,40 @@ export class RapierPhysics implements PhysicsBackend {
         this.buildChunk(entry, shape, chunk);
       }
       shape.dirtyColliderChunks.clear();
+      entry.shapeSolids.set(shape.id, shape.solidVoxels);
     }
+  }
+
+  private refitDetachedShapes(entry: Entry): boolean {
+    const live = new Map(entry.body.shapes.map(shape => [shape.id, shape]));
+    let refitted = false;
+    for (const [id, before] of entry.shapeSolids) {
+      const shape = live.get(id);
+      if (shape && shape.solidVoxels >= before * 0.5) continue;
+      refitted = true;
+      for (const key of [...entry.chunkColliders.keys()]) {
+        if (!key.startsWith(`${id}:`)) continue;
+        const chunk = Number(key.slice(key.indexOf(':') + 1));
+        if (shape) this.buildChunk(entry, shape, chunk);
+        else this.removeChunkColliders(entry, key);
+      }
+      if (shape) {
+        shape.dirtyColliderChunks.clear();
+        entry.shapeSolids.set(id, shape.solidVoxels);
+      } else entry.shapeSolids.delete(id);
+    }
+    return refitted;
+  }
+
+  private removeChunkColliders(entry: Entry, key: string): void {
+    const old = entry.chunkColliders.get(key);
+    if (!old) return;
+    for (const c of old) {
+      this.rapierWorld.removeCollider(c, false);
+      const i = entry.colliders.indexOf(c);
+      if (i >= 0) entry.colliders.splice(i, 1);
+    }
+    entry.chunkColliders.delete(key);
   }
 
   /**
@@ -219,16 +278,8 @@ export class RapierPhysics implements PhysicsBackend {
   private buildChunk(entry: Entry, shape: VoxelShape, chunk: number): number {
     const R = this.RAPIER;
     const key = `${shape.id}:${chunk}`;
-    const old = entry.chunkColliders.get(key);
-    if (old) {
-      for (const c of old) {
-        this.rapierWorld.removeCollider(c, false);
-        const i = entry.colliders.indexOf(c);
-        if (i >= 0) entry.colliders.splice(i, 1);
-      }
-      entry.chunkColliders.delete(key);
-    }
-    if (shape.solidVoxels === 0) return 0;
+    this.removeChunkColliders(entry, key);
+    if (shape.solidInChunk(chunk) === 0) return 0;
 
     const region = shape.chunkBounds(chunk);
     const boxes = this.boxesFor(shape, region);
@@ -328,7 +379,7 @@ export class RapierPhysics implements PhysicsBackend {
     // Подхватываем новые и изменившиеся тела.
     for (const body of this.world.bodies.values()) {
       if (body.destroyed) continue;
-      if (!this.entries.has(body.id) || body.collidersDirty) this.sync(body);
+      if (!this.entries.has(body.id) || body.collidersDirty || body.kinematic || body.velocityDirty) this.sync(body);
     }
     for (const [id, entry] of this.entries) {
       if (!this.world.bodies.has(id) || entry.body.destroyed) this.remove(entry.body);
@@ -341,7 +392,7 @@ export class RapierPhysics implements PhysicsBackend {
       const body = this.pending.shift()!;
       this.pendingIds.delete(body.id);
       const entry = this.entries.get(body.id);
-      if (!entry || body.destroyed) continue;
+      if (!entry || body.destroyed || !body.collidersDirty) continue;
       if (this.dirtyChunkCount(body) > 0) {
         rebuilt += this.rebuildDirtyChunks(entry, this.cfg.rebuildBudget - rebuilt);
         // Не всё влезло в бюджет — тело остаётся в очереди на следующий шаг.
@@ -402,6 +453,7 @@ export class RapierPhysics implements PhysicsBackend {
   }
 
   private drainImpacts(): void {
+    const hitPoints = new Map<number, Vec3[]>();
     this.events.drainContactForceEvents((event) => {
       const c1 = this.rapierWorld.getCollider(event.collider1());
       const c2 = this.rapierWorld.getCollider(event.collider2());
@@ -414,20 +466,51 @@ export class RapierPhysics implements PhysicsBackend {
       // силе это неотличимо от падения плиты.
       const ea = a ? this.entries.get(a.id) : undefined;
       const eb = b ? this.entries.get(b.id) : undefined;
-      const impulse = Math.max(ea?.lastImpulse ?? 0, eb?.lastImpulse ?? 0);
+      const bodyImpulse = Math.max(ea?.lastImpulse ?? 0, eb?.lastImpulse ?? 0);
       const speedDrop = Math.max(ea?.lastSpeedDrop ?? 0, eb?.lastSpeedDrop ?? 0);
-      if (impulse < this.cfg.impactThreshold) return;
+      if (bodyImpulse < this.cfg.impactThreshold) return;
       if (speedDrop < this.cfg.minImpactSpeed) return;
 
-      const t = c1.translation();
-      const point = v3(t.x, t.y, t.z);
+      const body = a?.kind === 'dynamic' && !a.kinematic ? a : b;
+      if (!body) return;
+      const points = hitPoints.get(body.id) ?? [];
+      if (points.length >= 4) return;
+      let point: Vec3 | undefined;
+      let impulse = 0;
+      let normal = v3(0, 1, 0);
+      this.rapierWorld.contactPair(c1, c2, manifold => {
+        if (point) return;
+        let total = 0;
+        for (let i = 0; i < manifold.numContacts(); i++) total += manifold.contactImpulse(i);
+        const share = total / Math.max(1, manifold.numSolverContacts());
+        if (share < this.cfg.impactThreshold) return;
+        for (let i = 0; i < manifold.numSolverContacts(); i++) {
+          const p = manifold.solverContactPoint(i);
+          if (points.some(prev => distance(prev, p) < 1)) continue;
+          point = v3(p.x, p.y, p.z);
+          impulse = share;
+          const n = manifold.normal();
+          normal = v3(n.x, n.y, n.z);
+          break;
+        }
+      });
+      if (!point) return;
+      if (body.tags.has('debris')) {
+        if (!body.fractureOnImpact || speedDrop > body.fractureSpeed) {
+          body.fracturePoint = { ...point };
+          body.fractureSpeed = speedDrop;
+        }
+        body.fractureOnImpact = true;
+      }
+      points.push(point);
+      hitPoints.set(body.id, points);
 
       this.world.events.emit('impact', {
-        body: a ?? b!,
-        other: a ? b : null,
+        body,
+        other: body === a ? b : a,
         point,
         impulse,
-        normal: v3(0, 1, 0),
+        normal,
       });
 
       const over = impulse - this.cfg.impactThreshold;

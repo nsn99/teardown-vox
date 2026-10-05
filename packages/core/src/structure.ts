@@ -10,6 +10,8 @@ export interface StructureOptions {
   minFragmentVoxels?: number;
   /** Больше этого числа обломков за шаг не отделяем — остальное в следующий кадр. */
   maxFragmentsPerStep?: number;
+  /** Ребро куска крупного обломка, расколовшегося при ударе, в вокселях. */
+  impactFragmentSize?: number;
   /**
    * Глобальный множитель нагрузки. 1 — «инженерный» баланс из таблицы
    * материалов; выше — здания рушатся охотнее.
@@ -52,6 +54,7 @@ const DEFAULTS = {
   gravity: 9.81,
   minFragmentVoxels: 4,
   maxFragmentsPerStep: 64,
+  impactFragmentSize: CHUNK_SIZE,
   loadScale: 1,
   stress: true,
   incremental: true,
@@ -276,6 +279,7 @@ interface StressCache {
 // остальное остаётся с прошлого полного прохода. Заодно исчезает по
 // двадцать мегабайт аллокаций на каждый удар по складу.
 const stressCache = new WeakMap<VoxelShape, StressCache>();
+const stressCascades = new WeakMap<VoxelShape, number>();
 
 /** Был ли по форме полный проход — без него частичному не на что опереться. */
 export function stressCacheReady(shape: VoxelShape): boolean {
@@ -285,6 +289,7 @@ export function stressCacheReady(shape: VoxelShape): boolean {
 /** Только для тестов: забыть накопленные поля нагрузок. */
 export function __clearStressCache(shape: VoxelShape): void {
   stressCache.delete(shape);
+  stressCascades.delete(shape);
 }
 
 /**
@@ -720,6 +725,13 @@ export interface PartialStressPlan {
  * undefined — считать всю форму целиком.
  */
 export function partialStressPlan(shape: VoxelShape): PartialStressPlan | undefined {
+  const cascadeVoxels = stressCascades.get(shape);
+  if (cascadeVoxels !== undefined) {
+    // Новый удар сначала обрабатываем по его локальной области. Цепочку
+    // вторичных отказов между ударами проверяем полным пересчётом.
+    if (cascadeVoxels === shape.solidVoxels) return undefined;
+    stressCascades.delete(shape);
+  }
   if (shape.volume < PARTIAL_STRESS_MIN_VOLUME) return undefined;
   if (!stressCacheReady(shape)) return undefined;
   const dirty = shape.dirtyStructureChunks;
@@ -891,6 +903,10 @@ export function solveBodyStructure(
     if (cfg.stress) {
       const plan = cfg.incremental ? partialStressPlan(shape) : undefined;
       const { failures } = computeStress(shape, cfg, plan?.region);
+      // Массовый разрыв запускает перераспределение нагрузки за пределами
+      // задетого чанка. До затухания такой цепочки нужен полный расчёт.
+      if (failures.length >= CHUNK_SIZE) stressCascades.set(shape, shape.solidVoxels);
+      else if (failures.length === 0) stressCascades.delete(shape);
       // Разбор грязи до правок: то, что разрушат сами напряжения, должно
       // попасть в следующий проход, а не потеряться вместе с чанками.
       if (plan) shape.consumeStructureChunks(plan.chunks);
@@ -955,17 +971,50 @@ export function solveBodyStructure(
 
 function shapeCleanup(body: Body): void {
   body.shapes = body.shapes.filter((s) => s.solidVoxels > 0);
+  for (const shape of body.shapes) {
+    if (stressCascades.has(shape)) stressCascades.set(shape, shape.solidVoxels);
+  }
   body.collidersDirty = true;
 }
 
-/** После удара свободный обломок тоже может распасться на несвязные части.
- * Якоря здесь не используются: связный падающий кусок остаётся тем же телом.
+/** Удаление вокселей разделяет свободный обломок по связности.
+ * Сильный удар дополнительно раскалывает крупные пролёты: оболочка здания
+ * не должна опускаться целиком и сохранять стены вертикальными.
  */
 function splitFallingDebris(body: Body, cfg: Required<StructureOptions>): StructureResult {
   const result: StructureResult = { fragments: [], detachedVoxels: 0, dustVoxels: 0, stressFailures: 0 };
+  const fracture = body.fractureOnImpact;
+  let pending = false;
   for (const shape of body.shapes) {
-    if (!shape.structureDirty || shape.solidVoxels === 0) continue;
-    const components = findLooseComponents(shape, new Uint8Array(shape.volume));
+    if ((!shape.structureDirty && !fracture) || shape.solidVoxels === 0) continue;
+    let components = findLooseComponents(shape, new Uint8Array(shape.volume));
+    if (fracture) {
+      const size = Math.max(1, Math.floor(cfg.impactFragmentSize));
+      components = components.flatMap(component => {
+        if (component.length <= size) return [component];
+        const c = { x: 0, y: 0, z: 0 };
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity;
+        let x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+        for (const index of component) {
+          shape.coords(index, c);
+          x0 = Math.min(x0, c.x); y0 = Math.min(y0, c.y); z0 = Math.min(z0, c.z);
+          x1 = Math.max(x1, c.x); y1 = Math.max(y1, c.y); z1 = Math.max(z1, c.z);
+        }
+        if (Math.max(x1 - x0 + 1, y1 - y0 + 1, z1 - z0 + 1) <= size) return [component];
+        const cells = new Map<number, number[]>();
+        const nx = Math.ceil(shape.sx / size);
+        const nz = Math.ceil(shape.sz / size);
+        for (const index of component) {
+          shape.coords(index, c);
+          const key = Math.floor(c.x / size) + nx *
+            (Math.floor(c.z / size) + nz * Math.floor(c.y / size));
+          const cell = cells.get(key);
+          if (cell) cell.push(index);
+          else cells.set(key, [index]);
+        }
+        return [...cells.values()];
+      });
+    }
     components.sort((a, b) => b.length - a.length);
     shape.clearStructureDirty();
     shape.takeStructureChanges();
@@ -977,14 +1026,44 @@ function splitFallingDebris(body: Body, cfg: Required<StructureOptions>): Struct
         continue;
       }
       // Остаток дочитается в следующем проходе, не исчезает по лимиту.
-      if (result.fragments.length >= cfg.maxFragmentsPerStep) break;
+      if (result.fragments.length >= cfg.maxFragmentsPerStep) {
+        pending = fracture;
+        if (comp.length > 0) {
+          const c = shape.coords(comp[0]);
+          shape.markDirty(c.x, c.y, c.z);
+        }
+        break;
+      }
       const fragment = extractFragment(body, shape, comp);
+      if (fracture) releaseImpact(fragment.body, fragment.center, body);
       result.fragments.push({body: fragment.body, voxels: comp.length, mass: fragment.mass, center: fragment.center});
       result.detachedVoxels += comp.length;
     }
   }
+  body.fractureOnImpact = pending;
+  if (fracture && !pending && result.fragments.length > 0 && body.shapes[0]?.solidVoxels) {
+    const shape = body.shapes[0];
+    const center = add(body.transform.position, rotateVec(body.transform.rotation,
+      add(shape.transform.position, rotateVec(shape.transform.rotation, shape.centerOfMass()))));
+    releaseImpact(body, center, body);
+  }
+  if (!pending) body.fractureSpeed = 0;
   shapeCleanup(body);
   return result;
+}
+
+/** Часть энергии удара уходит в разлёт и поворот расколовшихся частей. */
+function releaseImpact(fragment: Body, center: Vec3, source: Body): void {
+  const dx = center.x - source.fracturePoint.x;
+  const dz = center.z - source.fracturePoint.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-6 || source.fractureSpeed <= 0) return;
+  const kick = Math.min(1.5, source.fractureSpeed * 0.2);
+  const spin = Math.min(1, source.fractureSpeed * 0.18);
+  fragment.velocity = add(fragment.velocity, v3(dx / d * kick, 0, dz / d * kick));
+  fragment.angularVelocity = add(fragment.angularVelocity, v3(dz / d * spin, 0, -dx / d * spin));
+  fragment.velocityDirty = true;
+  fragment.wake();
 }
 
 /**
@@ -1008,7 +1087,7 @@ export function stepStructure(
 
   for (const body of [...world.bodies.values()]) {
     if (body.destroyed || body.passive) continue;
-    // Для падающих обломков проверяем связность, но не статические нагрузки.
+    // Обломки разделяем по связности и ударам, без статических нагрузок.
     // Техника управляет собственными узлами и в этот разбор не входит.
     if (body.kind !== 'static' && !body.tags.has('debris')) continue;
     for (const shape of body.shapes) {
@@ -1024,7 +1103,7 @@ export function stepStructure(
         shape.markDirty(c.x, c.y, c.z);
       }
     }
-    const dirty = body.shapes.some((s) => s.structureDirty);
+    const dirty = body.fractureOnImpact || body.shapes.some((s) => s.structureDirty);
     if (!dirty) continue;
     // Кончилось время — остальные тела досчитаем в следующем проходе.
     // Их чанки остаются грязными, ничего не теряется.

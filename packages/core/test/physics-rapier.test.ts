@@ -17,6 +17,45 @@ import { VS, staticBody } from './helpers.js';
  * по-настоящему, а не «на глаз в браузере».
  */
 describe('Rapier как физический бэкенд', () => {
+  it('массовое отделение убирает прежние коллайдеры за один шаг даже с бюджетом в один чанк', async () => {
+    const world = new VoxelWorld();
+    const shape = new VoxelShape({ sx: 96, sy: 4, sz: 4, voxelSize: VS });
+    shape.fill({}, Mat.Concrete);
+    const other = new VoxelShape({ sx: 4, sy: 4, sz: 4, voxelSize: VS });
+    other.fill({}, Mat.Concrete);
+    other.transform.position = v3(-10, 0, 0);
+    const body = world.addBody(new Body({ kind: 'static', shapes: [shape, other] }));
+    const physics = await RapierPhysics.create(world, { rebuildBudget: 1 });
+    try {
+      physics.step(1 / 60);
+      expect(physics.colliderCount).toBe(4);
+      const cleanBounds = vi.spyOn(other, 'chunkBounds');
+      shape.fill({ x0: 16, x1: 96 }, Mat.Air);
+      body.collidersDirty = true;
+      physics.step(1 / 60);
+      expect(physics.colliderCount).toBe(2);
+      expect(cleanBounds).not.toHaveBeenCalled();
+      cleanBounds.mockRestore();
+    } finally { physics.dispose(); }
+  });
+
+  it('кинематический коллайдер следует за движением тела без разрушения формы', async () => {
+    const world = new VoxelWorld();
+    const shape = new VoxelShape({ sx: 20, sy: 6, sz: 20, voxelSize: VS });
+    shape.fill({}, Mat.Foundation);
+    const platform = world.addBody(new Body({ kind: 'dynamic', kinematic: true, shapes: [shape] }));
+    const falling = cube(world, 1, Mat.Wood, 4);
+    falling.transform.position.x = 3;
+    const physics = await RapierPhysics.create(world);
+    try {
+      physics.step(1 / 60);
+      platform.transform.position.x = 3;
+      for (let i = 0; i < 120; i++) physics.step(1 / 60);
+      expect(falling.transform.position.y).toBeGreaterThan(0.55);
+      expect(falling.transform.position.y).toBeLessThan(0.7);
+    } finally { physics.dispose(); }
+  });
+
   it('пожар не ставит одну форму в очередь повторно между порциями пересборки', async () => {
     const world = new VoxelWorld();
     const shape = new VoxelShape({ sx: 96, sy: 4, sz: 4, voxelSize: 0.1 });
@@ -89,6 +128,22 @@ describe('Rapier как физический бэкенд', () => {
     expect(body.velocity.x).toBeGreaterThan(1.9);
     expect(body.angularVelocity.y).toBeGreaterThan(0.9);
     physics.dispose();
+  });
+
+  it('раскол передаёт новую скорость уже существующему телу Rapier', async () => {
+    const world = new VoxelWorld({ gravity: v3() });
+    const body = cube(world, 3, Mat.Wood);
+    const physics = await RapierPhysics.create(world);
+    try {
+      physics.step(1 / 60);
+      body.velocity = v3(2, 0, 0);
+      body.angularVelocity = v3(0, 1, 0);
+      body.velocityDirty = true;
+      physics.step(1 / 60);
+      expect(body.velocity.x).toBeGreaterThan(1.9);
+      expect(body.angularVelocity.y).toBeGreaterThan(0.9);
+      expect(body.velocityDirty).toBe(false);
+    } finally { physics.dispose(); }
   });
 
   it('взрыв действует по центру массы смещённой формы, а не по началу координат тела', async () => {

@@ -217,13 +217,13 @@
           "op": "fill",
           "box": [
             80,
-            0,
+            3,
             0,
             120,
             40,
             3
           ],
-          "mat": "metal"
+          "mat": "air"
         },
         {
           "op": "grid",
@@ -352,6 +352,223 @@
               120
             ]
           ]
+        },
+        {
+          "op": "fill",
+          "box": [
+            82,
+            0,
+            0,
+            118,
+            3,
+            154
+          ],
+          "mat": "air"
+        },
+        {
+          "op": "fill",
+          "box": [
+            77,
+            0,
+            0,
+            81,
+            44,
+            6
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            119,
+            0,
+            0,
+            123,
+            44,
+            6
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            77,
+            40,
+            0,
+            123,
+            44,
+            6
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            80,
+            2,
+            0,
+            82,
+            3,
+            154
+          ],
+          "mat": "concrete",
+          "color": "#d6b64e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            118,
+            2,
+            0,
+            120,
+            3,
+            154
+          ],
+          "mat": "concrete",
+          "color": "#d6b64e"
+        }
+      ]
+    },
+    {
+      "name": "warehouse-gate-frame",
+      "size": [
+        44,
+        85,
+        3
+      ],
+      "position": [
+        13.8,
+        0,
+        13.6
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            2,
+            85,
+            3
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            42,
+            0,
+            0,
+            44,
+            85,
+            3
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            82,
+            0,
+            44,
+            85,
+            3
+          ],
+          "mat": "heavy_metal",
+          "color": "#69777f"
+        },
+        {
+          "op": "grid",
+          "box": [
+            0,
+            0,
+            0,
+            2,
+            20,
+            1
+          ],
+          "cell": [
+            2,
+            2,
+            1
+          ],
+          "step": [
+            1000,
+            4,
+            1000
+          ],
+          "mat": "heavy_metal",
+          "color": "#d6b64e"
+        },
+        {
+          "op": "grid",
+          "box": [
+            42,
+            0,
+            0,
+            44,
+            20,
+            1
+          ],
+          "cell": [
+            2,
+            2,
+            1
+          ],
+          "step": [
+            1000,
+            4,
+            1000
+          ],
+          "mat": "heavy_metal",
+          "color": "#d6b64e"
+        }
+      ]
+    },
+    {
+      "name": "warehouse-gate-apron",
+      "size": [
+        60,
+        6,
+        80
+      ],
+      "position": [
+        13,
+        -0.6,
+        6
+      ],
+      "structural": false,
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            60,
+            3,
+            80
+          ],
+          "mat": "foundation"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            3,
+            0,
+            60,
+            6,
+            80
+          ],
+          "mat": "concrete"
         }
       ]
     },
@@ -664,6 +881,18 @@
             90
           ],
           "mat": "plank"
+        },
+        {
+          "op": "fill",
+          "box": [
+            90,
+            18,
+            55,
+            140,
+            22,
+            90
+          ],
+          "mat": "air"
         }
       ]
     },
@@ -953,6 +1182,93 @@
           {
             "op": "fill",
             "mat": "water"
+          }
+        ]
+      }
+    },
+    {
+      "name": "warehouse-gate",
+      "kind": "dynamic",
+      "kinematic": true,
+      "tags": [
+        "gate"
+      ],
+      "volume": {
+        "name": "warehouse-gate-panel",
+        "size": [
+          40,
+          40,
+          3
+        ],
+        "position": [
+          14,
+          0,
+          13.6
+        ],
+        "grounded": false,
+        "structural": false,
+        "ops": [
+          {
+            "op": "fill",
+            "box": [
+              0,
+              0,
+              1,
+              40,
+              40,
+              3
+            ],
+            "mat": "metal",
+            "color": "#99a5ae"
+          },
+          {
+            "op": "grid",
+            "box": [
+              0,
+              0,
+              0,
+              40,
+              40,
+              1
+            ],
+            "cell": [
+              40,
+              1,
+              1
+            ],
+            "step": [
+              1000,
+              4,
+              1000
+            ],
+            "mat": "metal",
+            "color": "#667780"
+          },
+          {
+            "op": "fill",
+            "box": [
+              0,
+              0,
+              0,
+              40,
+              2,
+              3
+            ],
+            "mat": "metal",
+            "color": "#495c68"
+          },
+          {
+            "op": "fill",
+            "box": [
+              13,
+              7,
+              0,
+              27,
+              9,
+              1
+            ],
+            "mat": "metal",
+            "color": "#384b58"
           }
         ]
       }
@@ -1429,6 +1745,24 @@
       "collects": [
         "safe"
       ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "warehouse-entry",
+      "body": "warehouse-gate",
+      "rise": 4.1,
+      "speed": 4,
+      "approachRadius": 8,
+      "closeDelay": 2,
+      "support": {
+        "volume": "warehouse-gate-frame",
+        "voxel": [
+          22,
+          83,
+          1
+        ]
+      }
     }
   ]
 }

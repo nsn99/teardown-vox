@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Mat, Simulation, v3 } from '@tvox/core';
 import {
+  AutomaticGate,
   LevelDoc,
   LevelFormatError,
   PORT_DOC,
@@ -76,6 +77,78 @@ function broken(mutate: (doc: Record<string, unknown>) => void): unknown {
   mutate(doc);
   return doc;
 }
+
+function gateDoc(): LevelDoc {
+  const doc = tinyDoc();
+  doc.props = [{ name: 'door', kind: 'dynamic', kinematic: true, tags: ['gate'],
+    volume: { name: 'panel', size: [40, 40, 3], position: [4, 0, 0], grounded: false,
+      structural: false, ops: [{ op: 'fill', mat: 'metal', color: '#99a5ae' }] } }];
+  doc.gates = [{ id: 'door', body: 'door', rise: 4.1, speed: 4, approachRadius: 8, closeDelay: 2,
+    support: { volume: 'room', voxel: [1, 29, 1] } }];
+  return doc;
+}
+
+describe('ворота в формате карты', () => {
+  it('сохраняет механизм, краску и повреждения открытой створки и загружает её закрытой', () => {
+    const level = levelFromDoc(gateDoc());
+    const sim = new Simulation();
+    const restored = new Simulation();
+    try {
+      level.build(sim);
+      const gate = new AutomaticGate(sim, level.gates![0]);
+      const shape = gate.body.shapes[0];
+      shape.set(3, 3, 1, Mat.Air);
+      shape.paint.set(shape.idx(0, 0, 0), 0x1889900);
+      gate.update({ min: v3(5, 0.1, -2), max: v3(6, 2, -1) }, 1.1);
+      expect(gate.opening).toBe(1);
+      const saved = parseLevelDoc(docFromLevel(level, sim));
+      expect(saved.gates).toEqual(gateDoc().gates);
+      expect(saved.props!.find(p => p.name === 'door')!.kinematic).toBe(true);
+      const next = levelFromDoc(saved);
+      next.build(restored);
+      const door = new AutomaticGate(restored, next.gates![0]);
+      expect(door.opening).toBe(0);
+      expect(door.body.aabb().min.y).toBe(0);
+      expect(door.body.shapes[0].get(3, 3, 1)).toBe(Mat.Air);
+      expect(door.body.shapes[0].paint.get(door.body.shapes[0].idx(0, 0, 0))).toBe(0x1889900);
+    } finally { sim.dispose(); restored.dispose(); }
+  });
+
+  it.each(['rise', 'speed', 'approachRadius'] as const)('не принимает нулевое значение %s', field => {
+    const doc = gateDoc();
+    doc.gates![0][field] = 0;
+    expect(() => parseLevelDoc(doc)).toThrow(`gates[0].${field}`);
+  });
+
+  it('проверяет задержку, повторные имена и ссылки на тела и раму', () => {
+    const doc = gateDoc();
+    doc.gates![0].closeDelay = -1;
+    expect(() => parseLevelDoc(doc)).toThrow('gates[0].closeDelay');
+    doc.gates![0].closeDelay = 2;
+    doc.gates!.push({ ...doc.gates![0] });
+    expect(() => parseLevelDoc(doc)).toThrow('gates[1].id');
+    doc.gates![1].id = 'second';
+    expect(() => parseLevelDoc(doc)).toThrow('gates[1].body');
+    doc.gates!.pop();
+    doc.gates![0].body = 'absent';
+    expect(() => parseLevelDoc(doc)).toThrow('gates[0].body');
+    doc.gates![0].body = 'door';
+    doc.gates![0].support!.volume = 'absent';
+    expect(() => parseLevelDoc(doc)).toThrow('gates[0].support.volume');
+    doc.gates![0].support!.volume = 'room';
+    doc.gates![0].support!.voxel = [1, 30, 1];
+    expect(() => parseLevelDoc(doc)).toThrow('gates[0].support.voxel');
+  });
+
+  it('кинематическая створка должна быть динамическим телом', () => {
+    const doc = gateDoc();
+    doc.props![0].kind = 'static';
+    expect(() => parseLevelDoc(doc)).toThrow('props[0].kinematic');
+    doc.props![0].kind = 'dynamic';
+    doc.props![0].kinematic = false;
+    expect(() => parseLevelDoc(doc)).toThrow('gates[0].body');
+  });
+});
 
 describe('формат карты', () => {
   it('минимальная карта разбирается и собирается', () => {

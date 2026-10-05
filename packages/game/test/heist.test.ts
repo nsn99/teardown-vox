@@ -84,6 +84,8 @@ describe('карта M: порт', () => {
       'vehicle-yard-east',
       'vehicle-yard-south',
       'warehouse',
+      'warehouse-gate-frame',
+      'warehouse-gate-apron',
       'office',
       'crane',
       'pier',
@@ -377,7 +379,11 @@ describe('прохождение ограбления', () => {
       h.inventory.tick(1);
     }
     const damaged = h.sim.world.totalSolidVoxels();
+    h.gates[0].update({ min: v3(15, 0.1, 12), max: v3(17, 2, 13) }, 1.1);
+    expect(h.gates[0].opening).toBe(1);
     h.restart();
+    expect(h.gates).toHaveLength(1);
+    expect(h.gates[0].opening).toBe(0);
     expect(h.sim.world.totalSolidVoxels()).toBeGreaterThan(damaged);
     expect(h.mission.phase).toBe('recon');
     expect(h.driving).toBeNull();
