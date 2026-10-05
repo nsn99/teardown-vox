@@ -7,6 +7,7 @@ export * from './character.js';
 export * from './vehicles.js';
 export * from './level.js';
 export * from './gates.js';
+export * from './cranes.js';
 export * from './heist.js';
 export * from './levels/port.js';
 export * from './audio.js';

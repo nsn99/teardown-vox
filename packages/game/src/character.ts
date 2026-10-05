@@ -269,8 +269,8 @@ function snapDown(
 }
 
 /** Есть ли в коробке хоть один твёрдый воксель (вода — не твёрдая). */
-export function overlapsSolid(world: VoxelWorld, box: Aabb): boolean {
-  return scanAabb(world, box, (mat) => mat !== Mat.Air && mat !== Mat.Water && mat !== Mat.Paint);
+export function overlapsSolid(world: VoxelWorld, box: Aabb, ignore?: ReadonlySet<number>): boolean {
+  return scanAabb(world, box, (mat) => mat !== Mat.Air && mat !== Mat.Water && mat !== Mat.Paint, ignore);
 }
 
 export function overlapsMaterial(world: VoxelWorld, box: Aabb, mat: number): boolean {
@@ -284,9 +284,9 @@ export function overlapsMaterial(world: VoxelWorld, box: Aabb, mat: number): boo
  * пара лишних вокселей на проверку дешевле, чем полноценный SAT, а
  * уровень всё равно выровнен по осям.
  */
-function scanAabb(world: VoxelWorld, box: Aabb, accept: (mat: number) => boolean): boolean {
+function scanAabb(world: VoxelWorld, box: Aabb, accept: (mat: number) => boolean, ignore?: ReadonlySet<number>): boolean {
   for (const body of world.bodies.values()) {
-    if (body.destroyed) continue;
+    if (body.destroyed || ignore?.has(body.id)) continue;
     if (!aabbOverlaps(body.aabb(), box)) continue;
 
     for (const shape of body.shapes) {

@@ -13,6 +13,8 @@ import {
 } from '@tvox/core';
 import {
   Daylight,
+  CraneDef,
+  CranePartDef,
   EnvironmentDef,
   EscapeRoute,
   GateDef,
@@ -121,6 +123,16 @@ export type VehicleDoc = Omit<VehicleSpawnDef, 'position'> & { position: Vec3Doc
 export type GateDoc = Omit<GateDef, 'support'> & {
   support?: { volume: string; voxel: Vec3Doc };
 };
+type CranePartDoc = Omit<CranePartDef, 'pivot' | 'anchors'> & { pivot: Vec3Doc; anchors: Vec3Doc[] };
+export type CraneDoc = Omit<CraneDef, 'base' | 'house' | 'boom' | 'hook' | 'stay' | 'tip' | 'cab'> & {
+  base: { volume: string; anchors: Vec3Doc[] };
+  house: CranePartDoc;
+  boom: CranePartDoc & { support: Vec3Doc[] };
+  hook: CranePartDoc;
+  stay: { body: string; from: Vec3Doc; to: Vec3Doc };
+  tip: Vec3Doc;
+  cab: { seat: Vec3Doc; exit: Vec3Doc; control: Vec3Doc };
+};
 export type TargetDoc = Omit<TargetSpec, 'position'> & { position: Vec3Doc };
 export type ChaserDoc = Omit<ChaserSpec, 'from'> & { from: Vec3Doc };
 export type LightDocEntry = Omit<LightDef, 'position' | 'target'> & {
@@ -152,6 +164,7 @@ export interface LevelDoc {
   triggers: TriggerDoc[];
   vehicles: VehicleDoc[];
   gates?: GateDoc[];
+  cranes?: CraneDoc[];
   mission: MissionDoc;
   /** Кто приходит по концу таймера. Пусто — берутся умолчания. */
   pursuit?: ChaserDoc[];
@@ -176,6 +189,24 @@ export const gatesOf = (doc: LevelDoc): GateDef[] =>
   (doc.gates ?? []).map(({ support, ...g }) => ({ ...g, ...(support ? {
     support: { volume: support.volume, voxel: point(support.voxel) },
   } : {}) }));
+
+export const cranesOf = (doc: LevelDoc): CraneDef[] => (doc.cranes ?? []).map(c => ({
+  ...c, base: { ...c.base, anchors: c.base.anchors.map(point) },
+  house: { ...c.house, pivot: point(c.house.pivot), anchors: c.house.anchors.map(point) },
+  boom: { ...c.boom, pivot: point(c.boom.pivot), anchors: c.boom.anchors.map(point), support: c.boom.support.map(point) },
+  hook: { ...c.hook, pivot: point(c.hook.pivot), anchors: c.hook.anchors.map(point) },
+  stay: { ...c.stay, from: point(c.stay.from), to: point(c.stay.to) },
+  tip: point(c.tip), cab: { seat: point(c.cab.seat), exit: point(c.cab.exit), control: point(c.cab.control) },
+}));
+
+export const craneDocOf = (c: CraneDef): CraneDoc => ({
+  ...c, base: { ...c.base, anchors: c.base.anchors.map(flat) },
+  house: { ...c.house, pivot: flat(c.house.pivot), anchors: c.house.anchors.map(flat) },
+  boom: { ...c.boom, pivot: flat(c.boom.pivot), anchors: c.boom.anchors.map(flat), support: c.boom.support.map(flat) },
+  hook: { ...c.hook, pivot: flat(c.hook.pivot), anchors: c.hook.anchors.map(flat) },
+  stay: { ...c.stay, from: flat(c.stay.from), to: flat(c.stay.to) },
+  tip: flat(c.tip), cab: { seat: flat(c.cab.seat), exit: flat(c.cab.exit), control: flat(c.cab.control) },
+});
 
 /** Миссия документа в игровую. */
 export const missionOf = (doc: LevelDoc): MissionConfig => ({
@@ -515,6 +546,7 @@ function parseLight(v: unknown, path: string): LightDocEntry {
   }
   return {
     kind,
+    ...(o.body === undefined ? {} : { body: str(o.body, `${path}.body`) }),
     position: vec3(o.position, `${path}.position`),
     ...(o.target === undefined ? {} : { target: vec3(o.target, `${path}.target`) }),
     color,
@@ -583,6 +615,18 @@ export function parseLevelDoc(input: unknown): LevelDoc {
     ? (o.props as unknown[]).map((p, i) => parseProp(p, `props[${i}]`)) : [];
   if (o.gates !== undefined && !Array.isArray(o.gates)) fail('gates', 'ожидался список ворот');
   const gates = Array.isArray(o.gates) ? o.gates.map((g, i) => parseGate(g, `gates[${i}]`)) : undefined;
+  if (o.cranes !== undefined && !Array.isArray(o.cranes)) fail('cranes', 'ожидался список кранов');
+  const cranes = Array.isArray(o.cranes) ? o.cranes.map((c, i) => parseCrane(c, `cranes[${i}]`, volumes, props, voxelSize)) : undefined;
+  const craneIds = new Set<string>();
+  const craneBodies = new Set<string>(gates?.map(g => g.body));
+  for (const [i, crane] of (cranes ?? []).entries()) {
+    if (craneIds.has(crane.id)) fail(`cranes[${i}].id`, 'повторное имя крана');
+    craneIds.add(crane.id);
+    for (const key of ['house', 'boom', 'hook', 'ropes', 'stay'] as const) {
+      if (craneBodies.has(crane[key].body)) fail(`cranes[${i}].${key}.body`, 'тело уже назначено другому механизму');
+      craneBodies.add(crane[key].body);
+    }
+  }
   const gateIds = new Set<string>();
   const gateBodies = new Set<string>();
   for (const [i, gate] of (gates ?? []).entries()) {
@@ -620,6 +664,7 @@ export function parseLevelDoc(input: unknown): LevelDoc {
       ? (o.vehicles as unknown[]).map((v, i) => parseVehicle(v, `vehicles[${i}]`))
       : [],
     ...(gates ? { gates } : {}),
+    ...(cranes ? { cranes } : {}),
     mission: parseMission(o.mission, 'mission'),
     ...(Array.isArray(o.pursuit)
       ? { pursuit: (o.pursuit as unknown[]).map((c, i) => parseChaser(c, `pursuit[${i}]`)) }
@@ -634,6 +679,77 @@ export function parseLevelDoc(input: unknown): LevelDoc {
 }
 
 const ROUTE_NEEDS: readonly RouteNeeds[] = ['foot', 'planks', 'vehicle', 'boat'];
+
+function parseCrane(value: unknown, path: string, volumes: VolumeDoc[], props: PropDoc[], voxelSize: number): CraneDoc {
+  if (!isObj(value)) fail(path, 'ожидался объект крана');
+  const o = value;
+  const object = (key: string): Record<string, unknown> => {
+    if (!isObj(o[key])) fail(`${path}.${key}`, 'ожидался объект узла');
+    return o[key] as Record<string, unknown>;
+  };
+  const positive = (v: unknown, field: string): number => {
+    const n = num(v, `${path}.${field}`);
+    if (n <= 0) fail(`${path}.${field}`, 'ожидалось положительное число');
+    return n;
+  };
+  const body = (raw: Record<string, unknown>, key: string): PropDoc => {
+    const name = str(raw.body, `${path}.${key}.body`);
+    const matching = props.filter(p => p.name === name);
+    if (matching.length !== 1 || matching[0].kind !== 'dynamic' || !matching[0].kinematic || matching[0].passive) {
+      fail(`${path}.${key}.body`, 'нужно одно разрушаемое кинематическое тело props');
+    }
+    return matching[0];
+  };
+  const anchors = (raw: unknown, key: string, volume: VolumeDoc): Vec3Doc[] => {
+    if (!Array.isArray(raw) || raw.length === 0) fail(`${path}.${key}`, 'нужен непустой список креплений');
+    return raw.map((entry, i) => {
+      const p = vec3(entry, `${path}.${key}[${i}]`);
+      if (p.some((n, axis) => !Number.isInteger(n) || n < 0 || n >= volume.size[axis])) {
+        fail(`${path}.${key}[${i}]`, 'крепление вне формы или не в целых вокселях');
+      }
+      return p;
+    });
+  };
+  const part = (key: string): CranePartDoc => {
+    const raw = object(key);
+    const prop = body(raw, key);
+    return { body: prop.name, pivot: vec3(raw.pivot, `${path}.${key}.pivot`), anchors: anchors(raw.anchors, `${key}.anchors`, prop.volume) };
+  };
+  const baseRaw = object('base');
+  const volume = volumes.find(v => v.name === baseRaw.volume);
+  if (!volume) fail(`${path}.base.volume`, 'нет неподвижной опоры');
+  const house = part('house');
+  const boom = part('boom');
+  const hook = part('hook');
+  const houseVolume = props.find(p => p.name === house.body)!.volume;
+  const ropesRaw = object('ropes');
+  const ropesProp = body(ropesRaw, 'ropes');
+  if (!Array.isArray(ropesRaw.columns) || ropesRaw.columns.length === 0) fail(`${path}.ropes.columns`, 'нужны тросы');
+  const columns = ropesRaw.columns.map((v, i) => int(v, `${path}.ropes.columns[${i}]`, 0));
+  if (new Set(columns).size !== columns.length || columns.some(x => x >= ropesProp.volume.size[0]) || ropesProp.volume.size[2] !== 1) {
+    fail(`${path}.ropes.columns`, 'тросы должны занимать разные столбцы формы толщиной один воксель');
+  }
+  const ropes = { body: ropesProp.name, columns, length: positive(ropesRaw.length, 'ropes.length'),
+    min: positive(ropesRaw.min, 'ropes.min'), max: positive(ropesRaw.max, 'ropes.max') };
+  if (ropes.min > ropes.length || ropes.length > ropes.max || ropes.max > ropesProp.volume.size[1] * voxelSize) {
+    fail(`${path}.ropes.length`, 'длина и пределы троса должны помещаться в форму');
+  }
+  const stayRaw = object('stay');
+  const stayProp = body(stayRaw, 'stay');
+  const cabRaw = object('cab');
+  const angle = positive(o.angle, 'angle');
+  const minAngle = positive(o.minAngle, 'minAngle');
+  const maxAngle = positive(o.maxAngle, 'maxAngle');
+  if (minAngle > angle || angle > maxAngle || maxAngle >= Math.PI / 2) fail(`${path}.angle`, 'углы стрелы должны лежать между 0 и π/2');
+  return { id: str(o.id, `${path}.id`), name: str(o.name, `${path}.name`),
+    base: { volume: volume.name, anchors: anchors(baseRaw.anchors, 'base.anchors', volume) }, house,
+    boom: { ...boom, support: anchors(object('boom').support, 'boom.support', houseVolume) }, hook, ropes,
+    stay: { body: stayProp.name, from: vec3(stayRaw.from, `${path}.stay.from`), to: vec3(stayRaw.to, `${path}.stay.to`) },
+    tip: vec3(o.tip, `${path}.tip`),
+    cab: { seat: vec3(cabRaw.seat, `${path}.cab.seat`), exit: vec3(cabRaw.exit, `${path}.cab.exit`), control: vec3(cabRaw.control, `${path}.cab.control`) },
+    angle, minAngle, maxAngle, slewSpeed: positive(o.slewSpeed, 'slewSpeed'), luffSpeed: positive(o.luffSpeed, 'luffSpeed'),
+    hoistSpeed: positive(o.hoistSpeed, 'hoistSpeed'), capacity: positive(o.capacity, 'capacity') };
+}
 
 function parseGate(v: unknown, path: string): GateDoc {
   if (!isObj(v)) fail(path, 'ожидался объект ворот');
@@ -911,6 +1027,7 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
     triggers: triggersOf(doc),
     vehicles: vehiclesOf(doc),
     ...(doc.gates ? { gates: gatesOf(doc) } : {}),
+    ...(doc.cranes ? { cranes: cranesOf(doc) } : {}),
     mission,
     ...(doc.pursuit ? { pursuit: pursuitOf(doc)! } : {}),
     ...(doc.environment ? { environment: environmentOf(doc)! } : {}),
@@ -1011,6 +1128,7 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
     ...(level.gates ? { gates: level.gates.map(({ support, ...g }) => ({ ...g, ...(support ? {
       support: { volume: support.volume, voxel: flat(support.voxel) },
     } : {}) })) } : {}),
+    ...(level.cranes ? { cranes: level.cranes.map(craneDocOf) } : {}),
     mission: {
       ...level.mission,
       targets: level.mission.targets.map((t) => ({ ...t, position: flat(t.position) })),

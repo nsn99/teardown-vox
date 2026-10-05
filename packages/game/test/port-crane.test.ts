@@ -4,17 +4,20 @@ import {
   computeAnchored, computeStress, findLooseComponents, transformPoint, v3,
 } from '@tvox/core';
 import {
-  ChargeSystem, CharacterController, Inventory, ToolContext, portLevel, useTool,
+  ChargeSystem, CharacterController, Inventory, NEUTRAL_CRANE_INPUT, PortCrane, ToolContext, portLevel, useTool,
 } from '@tvox/game';
 import { overlapsSolid } from '../src/character.js';
 
 let sim: Simulation;
+let controller: PortCrane;
 
 function scene(): VoxelShape {
   sim = new Simulation({
     structure: { timeBudgetMs: 0 }, structureEveryNSteps: 1, structureBudgetMs: 0,
   });
   const [level] = portLevel.build(sim);
+  controller = new PortCrane(sim, portLevel.cranes![0]);
+  controller.update(NEUTRAL_CRANE_INPUT, 0);
   return level.shapes.find(s => s.name === 'crane')!;
 }
 
@@ -87,7 +90,7 @@ describe('портовый кран', () => {
     ]) walkTo(character, x, z);
     expect(character.position.y).toBeCloseTo(10.9, 2);
     const console = sim.world.raycast(character.eye, v3(0, -0.6, -1), { maxDistance: 2 });
-    expect(console?.shape.name).toBe('crane');
+    expect(console?.shape.name).toBe('crane-house');
   });
 
   it('базовый контактный заряд вырезает отверстие в наружной стороне опоры', () => {
@@ -105,18 +108,19 @@ describe('портовый кран', () => {
   });
 
   it('базовый заряд разрывает оба подъёмных троса и освобождает крюк', () => {
-    const crane = scene();
+    scene();
     sim.primeStructure();
     const charges = new ChargeSystem({ fuse: Infinity });
     expect(charges.place(context('explosive', v3(31.55, 8, -5.8), v3(0, 0, 1)))).not.toBeNull();
     expect(charges.detonateAll(sim)).toBe(1);
-    const hook = [...sim.world.bodies.values()].find(b => b.kind === 'dynamic' && b.shapes.some(s => s.name.startsWith('crane:frag')));
+    controller.update(NEUTRAL_CRANE_INPUT, 0);
+    const hook = controller.hook;
     expect(hook).toBeDefined();
-    expect(hook!.tags.has('debris')).toBe(true);
-    expect(crane.get(36, 55, 11)).toBe(Mat.Air);
-    const beforeY = hook!.transform.position.y;
+    expect(hook.tags.has('debris')).toBe(true);
+    expect(hook.kinematic).toBe(false);
+    const beforeY = hook.transform.position.y;
     for (let i = 0; i < 45; i++) sim.step(1 / 60);
-    expect(hook!.transform.position.y).toBeLessThan(beforeY - 0.5);
+    expect(hook.transform.position.y).toBeLessThan(beforeY - 0.5);
   });
 
   it('обычная паяльная лампа режет стальную раскосину', () => {
@@ -151,16 +155,20 @@ describe('портовый кран', () => {
     }
     place(v3(30.55, 1.3, 9.3), v3(0, 0, -1));
     expect(charges.detonateAll(sim)).toBe(9);
-    expect(crane.get(17, 154, 124)).toBe(Mat.Air);
+    controller.update(NEUTRAL_CRANE_INPUT, 0);
+    expect(controller.house.kinematic).toBe(false);
+    expect(controller.operable).toBe(false);
+    expect(crane.get(36, 124, 125)).toBe(Mat.Air);
     const detached = [...sim.world.bodies.values()].filter(b => b.kind === 'dynamic'
-      && b.shapes.some(s => s.name.startsWith('crane:frag')));
+      && (b.tags.has('crane') || b.shapes.some(s => s.name.startsWith('crane:frag'))));
     expect(detached.length).toBeGreaterThan(0);
-    const shell = detached.reduce((a, b) => a.solidVoxels > b.solidVoxels ? a : b);
+    const upper = detached.filter(b => b.tags.has('crane'));
+    const shell = upper.reduce((a, b) => a.solidVoxels > b.solidVoxels ? a : b);
     const before = shell.solidVoxels;
-    const highBefore = highMetal([shell]);
+    const highBefore = highMetal(upper);
     expect(highBefore).toBeGreaterThan(1000);
     for (let i = 0; i < 240; i++) sim.step(1 / 60);
-    const pieces = [...sim.world.bodies.values()].filter(b => b.shapes.some(s => s.name.startsWith('crane:frag')));
+    const pieces = [...sim.world.bodies.values()].filter(b => b.tags.has('crane'));
     expect(Math.max(...pieces.map(b => b.solidVoxels))).toBeLessThan(before * 0.6);
     expect(highMetal(pieces)).toBeLessThan(highBefore * 0.2);
   }, 90_000);

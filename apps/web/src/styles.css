@@ -136,6 +136,21 @@ html, body {
 .belt li.is-active { color: var(--ink); border-color: var(--accent); }
 .belt li.is-empty { opacity: 0.35; }
 
+.crane-status {
+  position: absolute;
+  left: 22px;
+  bottom: 140px;
+  max-width: min(460px, calc(100vw - 36px));
+  padding: 12px 16px;
+  background: rgba(12, 20, 26, 0.88);
+  border-left: 3px solid #dba53b;
+  border-radius: 4px;
+  color: #f5f3ea;
+  white-space: pre-line;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
 .hint {
   position: fixed;
   left: 50%;

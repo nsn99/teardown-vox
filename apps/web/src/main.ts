@@ -5,6 +5,7 @@ import {
   LevelSource,
   chaseCamera,
   NEUTRAL_INPUT,
+  NEUTRAL_CRANE_INPUT,
   Profile,
   MAX_TIER,
   TOOL_IDS,
@@ -248,12 +249,19 @@ function handleActions(h: Heist): void {
     // Стоишь у машины с целью в руках — грузишь в кузов; иначе обычное
     // «взять/положить». Отдельную кнопку заводить незачем: действие одно
     // и то же, разница только в том, что рядом.
-    const stowed = h.stow();
-    if (stowed) {
-      hud.message(`В кузов: ${h.vehicles.get(stowed)?.spec.name ?? 'техника'}`, 1.5);
+    if (h.operating) {
+      const result = h.operating.toggleLoad();
+      const messages = { attached: 'Груз зацеплен', released: 'Груз отпущен', empty: 'Подведите крюк ближе к ящику или обломку',
+        overweight: 'Груз тяжелее 12 тонн', broken: 'Подъёмный механизм повреждён' };
+      hud.message(messages[result], 2);
     } else {
-      const id = h.interact();
-      if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
+      const stowed = h.stow();
+      if (stowed) {
+        hud.message(`В кузов: ${h.vehicles.get(stowed)?.spec.name ?? 'техника'}`, 1.5);
+      } else {
+        const id = h.interact();
+        if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
+      }
     }
   }
 
@@ -268,12 +276,13 @@ function handleActions(h: Heist): void {
   }
 
   if (input.take('KeyF')) {
-    const id = h.toggleVehicle();
+    const craneId = h.toggleCrane();
+    const id = craneId ?? h.toggleVehicle();
     if (id) {
       // За рулём вид от третьего лица уместнее: видно габариты и то, во что
       // ты сейчас въедешь. Пешком — обратно от первого.
       thirdPerson = h.driving !== null;
-      hud.message(h.driving ? `За рулём: ${h.driving.spec.name}` : 'Вышел', 1.5);
+      hud.message(h.operating ? 'За пультом крана. V — общий вид' : h.driving ? `За рулём: ${h.driving.spec.name}` : 'Вышел', 1.5);
     }
   }
 
@@ -316,7 +325,7 @@ function handleActions(h: Heist): void {
 
   const primaryPressed = input.take('Mouse0');
   const use = h.inventory.active === 'planks' ? primaryPressed : input.state.firing || primaryPressed;
-  if (use) {
+  if (use && !h.operating) {
     const res = h.use();
     if (res.used) {
       if (res.tool === 'extinguisher' && res.point) {
@@ -361,9 +370,10 @@ function cameraEye(h: Heist): { x: number; y: number; z: number } {
   const veh = h.driving;
   const ignore = new Set<number>();
   if (veh) ignore.add(veh.body.id);
+  if (h.operating) for (const id of h.operating.bodyIds) ignore.add(id);
   return chaseCamera(h.sim.world, h.eye, h.yaw, h.pitch, {
-    distance: veh ? 7 : 3.2,
-    height: veh ? 1.2 : 0.35,
+    distance: h.operating ? 18 : veh ? 7 : 3.2,
+    height: h.operating ? 4 : veh ? 1.2 : 0.35,
     ignore,
   });
 }
@@ -395,7 +405,8 @@ function frame(now: number): void {
     handleActions(h);
     if (paused) return;
     const move = input.sample();
-    h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT);
+    h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT,
+      h.operating ? { slew: move.right, luff: move.forward, hoist: Number(move.jump) - Number(move.crouch) } : NEUTRAL_CRANE_INPUT);
   } else {
     input.clearPressed();
   }

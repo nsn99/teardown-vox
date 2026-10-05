@@ -34,6 +34,34 @@ export interface GateDef {
   support?: { volume: string; voxel: Vec3 };
 }
 
+/** Подвижная часть крана: ось в мировых метрах, крепления в вокселях формы. */
+export interface CranePartDef {
+  body: string;
+  pivot: Vec3;
+  anchors: Vec3[];
+}
+
+export interface CraneDef {
+  id: string;
+  name: string;
+  base: { volume: string; anchors: Vec3[] };
+  house: CranePartDef;
+  boom: CranePartDef & { support: Vec3[] };
+  hook: CranePartDef;
+  ropes: { body: string; columns: number[]; length: number; min: number; max: number };
+  /** Натяжная тяга от оголовка к стреле; её разрыв освобождает стрелу. */
+  stay: { body: string; from: Vec3; to: Vec3 };
+  tip: Vec3;
+  cab: { seat: Vec3; exit: Vec3; control: Vec3 };
+  angle: number;
+  minAngle: number;
+  maxAngle: number;
+  slewSpeed: number;
+  luffSpeed: number;
+  hoistSpeed: number;
+  capacity: number;
+}
+
 export interface SpawnPoint {
   position: Vec3;
   yaw: number;
@@ -50,6 +78,8 @@ export type Daylight = 'day' | 'dusk' | 'night';
  */
 export interface LightDef {
   kind: 'point' | 'spot';
+  /** Если задано тело, положение и цель заданы в его локальных метрах. */
+  body?: string;
   position: Vec3;
   /** Куда светит прожектор. Точечной лампе не нужно. */
   target?: Vec3;
@@ -114,6 +144,7 @@ export interface LevelSource {
   triggers: TriggerDef[];
   vehicles: VehicleSpawnDef[];
   gates?: GateDef[];
+  cranes?: CraneDef[];
   mission: MissionConfig;
   /** Кто приходит по концу таймера тревоги. Пусто — умолчания погони. */
   pursuit?: ChaserSpec[];

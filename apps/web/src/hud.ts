@@ -22,6 +22,7 @@ export class Hud {
   private chaseFill = $('chase-fill');
   private hint = $('hint');
   private stats = $('stats');
+  private crane = $('crane-status');
   private hintTimer = 0;
 
   constructor() {
@@ -95,6 +96,17 @@ export class Hud {
     }
 
     this.stats.textContent = extra;
+
+    const crane = heist.operating;
+    this.crane.hidden = !crane && !heist.nearbyCrane;
+    if (crane) {
+      const degrees = (angle: number) => Math.round(angle * 180 / Math.PI);
+      this.crane.textContent = `КРАН · поворот ${degrees(crane.yaw)}° · стрела ${degrees(crane.angle)}° · крюк ${crane.grip.y.toFixed(1)} м\n` +
+        (crane.blocked ? 'На пути препятствие. Поднимите крюк или смените направление.\n' : '') +
+        (!crane.hoistIntact ? 'Трос или стрела повреждены.\n' : '') +
+        (crane.load ? `Груз: ${crane.load.name}\n` : 'Груз не зацеплен\n') +
+        'A/D — поворот · W/S — стрела · Пробел/Ctrl — крюк\nE — зацепить/отпустить · V — общий вид · F — встать';
+    } else if (!this.crane.hidden) this.crane.textContent = 'F — сесть за пульт крана';
 
     if (this.hintTimer > 0) {
       this.hintTimer -= dt;
