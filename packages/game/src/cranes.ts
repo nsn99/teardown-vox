@@ -296,6 +296,20 @@ export class PortCrane {
     }
     if (!nearest) return 'empty';
     if (nearest.mass() > this.def.capacity) return 'overweight';
+    // При зацеплении выбирается слабина: верх груза касается нижней
+    // дуги крюка, а не висит под ним на невидимом промежутке.
+    const box = nearest.aabb();
+    const original = nearest.transform.position;
+    nearest.transform.position = add(original, v3(
+      this.grip.x - clamp(this.grip.x, box.min.x + .001, box.max.x - .001),
+      Math.max(0, this.hook.aabb().min.y - box.max.y),
+      this.grip.z - clamp(this.grip.z, box.min.z + .001, box.max.z - .001),
+    ));
+    const ignore = new Set(this.bodyIds); ignore.add(nearest.id);
+    if (overlapsSolid(this.sim.world, nearest.aabb(), ignore)) {
+      nearest.transform.position = original;
+      return 'empty';
+    }
     const rotation = quatFromEulerYXZ(-this.yaw, 0);
     this.payload = { body: nearest, offset: rotateVec(rotation, sub(nearest.transform.position, this.grip)),
       rotation: quatMultiply(rotation, nearest.transform.rotation), previous: { ...nearest.transform.position } };

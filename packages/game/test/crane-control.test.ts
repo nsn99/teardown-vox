@@ -30,6 +30,7 @@ function takeYardCrate(crane: PortCrane): void {
   for (let i = 0; i < 80 && crane.grip.y > 2; i++) crane.update({ slew: 0, luff: 0, hoist: -1 }, .1);
   expect(crane.toggleLoad()).toBe('attached');
   expect(crane.load?.name).toBe('Ящик на поддоне');
+  expect(crane.load!.aabb().max.y).toBeCloseTo(crane.hook.aabb().min.y, 6);
 }
 afterEach(() => h?.sim.dispose());
 
