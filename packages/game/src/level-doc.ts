@@ -89,6 +89,8 @@ export interface VolumeDoc {
   name: string;
   /** Размер в вокселях. */
   size: Vec3Doc;
+  /** По умолчанию сетка карты; вода и дно могут использовать более крупную сетку. */
+  voxelSize?: number;
   /** Положение в метрах, мировые координаты. */
   position: Vec3Doc;
   /** Форма стоит на земле (влияет на структурный анализ). */
@@ -417,9 +419,12 @@ function parseVolume(v: unknown, path: string): VolumeDoc {
     int(n, `${path}.size[${i}]`, 1),
   ) as Vec3Doc;
   if (!Array.isArray(o.ops)) fail(`${path}.ops`, 'ожидался список операций');
+  const voxelSize = o.voxelSize === undefined ? undefined : num(o.voxelSize, `${path}.voxelSize`);
+  if (voxelSize !== undefined && voxelSize <= 0) fail(`${path}.voxelSize`, 'размер вокселя должен быть положительным');
   return {
     name: str(o.name, `${path}.name`),
     size,
+    ...(voxelSize === undefined ? {} : { voxelSize }),
     position: vec3(o.position, `${path}.position`),
     grounded: o.grounded === undefined ? true : Boolean(o.grounded),
     structural: o.structural === undefined ? true : Boolean(o.structural),
@@ -731,7 +736,7 @@ function parseCrane(value: unknown, path: string, volumes: VolumeDoc[], props: P
   }
   const ropes = { body: ropesProp.name, columns, length: positive(ropesRaw.length, 'ropes.length'),
     min: positive(ropesRaw.min, 'ropes.min'), max: positive(ropesRaw.max, 'ropes.max') };
-  if (ropes.min > ropes.length || ropes.length > ropes.max || ropes.max > ropesProp.volume.size[1] * voxelSize) {
+  if (ropes.min > ropes.length || ropes.length > ropes.max || ropes.max > ropesProp.volume.size[1] * (ropesProp.volume.voxelSize ?? voxelSize)) {
     fail(`${path}.ropes.length`, 'длина и пределы троса должны помещаться в форму');
   }
   const stayRaw = object('stay');
@@ -833,7 +838,7 @@ export function buildVolume(doc: VolumeDoc, voxelSize: number): VoxelShape {
     sx,
     sy,
     sz,
-    voxelSize,
+    voxelSize: doc.voxelSize ?? voxelSize,
     grounded: doc.grounded ?? true,
     name: doc.name,
   });
@@ -1163,6 +1168,7 @@ function snapshotVolume(s: VoxelShape): VolumeDoc {
   return {
     name: s.name,
     size: [s.sx, s.sy, s.sz],
+    voxelSize: s.voxelSize,
     position: [s.transform.position.x, s.transform.position.y, s.transform.position.z],
     grounded: s.grounded,
     structural: s.structural,

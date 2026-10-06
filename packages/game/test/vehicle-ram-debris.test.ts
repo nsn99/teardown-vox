@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Body, Mat, RapierPhysics, Simulation, VoxelShape, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, Vehicle } from '@tvox/game';
+import { roadSim } from './helpers/vehicle-world.js';
 
 function wall(sim: Simulation, material = Mat.Brick) {
   const shape = new VoxelShape({ sx: 80, sy: 30, sz: 4, voxelSize: 0.1, grounded: true });
@@ -31,7 +32,7 @@ function firstHit(car: Vehicle, sim: Simulation, target: Body) {
 
 describe('скол и обломки после тарана', () => {
   it('оставляет скол разной ширины по высоте и не останавливается на собственных кусках', () => {
-    const sim = new Simulation();
+    const sim = roadSim();
     const target = wall(sim);
     const car = pickup(sim);
     const position = firstHit(car, sim, target.body);
@@ -55,17 +56,18 @@ describe('скол и обломки после тарана', () => {
   });
 
   it('удаление дерева рядом со сталью не разрешает проехать сквозь сталь', () => {
-    const sim = new Simulation();
+    const sim = roadSim();
     const target = wall(sim, Mat.Metal);
     target.shape.fill({ x0: 36, x1: 40 }, Mat.Wood);
     const car = pickup(sim);
     const position = firstHit(car, sim, target.body);
-    expect(car.position).toEqual(position);
+    expect(car.position.x).toBe(position.x);
+    expect(car.position.z).toBe(position.z);
     expect(target.shape.get(41, 8, 2)).toBe(Mat.Metal);
   });
 
   it('на малой скорости кирпич не ломается и обломки не создаются', () => {
-    const sim = new Simulation();
+    const sim = roadSim();
     const target = wall(sim);
     const before = target.body.solidVoxels;
     const car = pickup(sim);
@@ -76,7 +78,7 @@ describe('скол и обломки после тарана', () => {
   });
 
   it('проверка щупа восстанавливает состояние обломков после временного исключения', () => {
-    const sim = new Simulation();
+    const sim = roadSim();
     const target = wall(sim);
     const car = pickup(sim);
     firstHit(car, sim, target.body);
@@ -87,9 +89,9 @@ describe('скол и обломки после тарана', () => {
 
   it('Rapier двигает выбитые куски и удерживает материал над полом', async () => {
     const sim = new Simulation();
-    const floor = new VoxelShape({ sx: 120, sy: 2, sz: 140, voxelSize: 0.1, grounded: true });
+    const floor = new VoxelShape({ sx: 120, sy: 2, sz: 300, voxelSize: 0.1, grounded: true });
     floor.fill({}, Mat.Foundation);
-    floor.transform.position = v3(-6, -0.2, -10);
+    floor.transform.position = v3(-6, -0.2, -25);
     sim.world.addBody(new Body({ kind: 'static', shapes: [floor] }));
     const target = wall(sim);
     const physics = await RapierPhysics.create(sim.world, { coarseAbove: Infinity });

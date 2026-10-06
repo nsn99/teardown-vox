@@ -41,7 +41,7 @@ export type Brush =
 export type Falloff = 'none' | 'linear' | 'quadratic';
 
 export interface CarveOptions {
-  /** Сила инструмента 0..1. Ниже toughness материала — эффекта нет вообще. */
+  /** Сила инструмента. Ниже toughness материала — эффекта нет вообще. */
   power: number;
   /** Единиц урона при полной силе за один вызов. */
   damage: number;
@@ -56,7 +56,7 @@ export interface CarveOptions {
   /** Не трогать эти тела. */
   ignoreBodies?: ReadonlySet<number>;
   /** Часть удалённых вокселей становится небольшими физическими обломками. */
-  physicalDebris?: { velocity: Vec3 };
+  physicalDebris?: { velocity: Vec3; maxFragments?: number };
 }
 
 export interface DebrisSample {
@@ -99,7 +99,11 @@ const CARVED_FRAGMENT_SIZE = 4;
 class RemovedFragments {
   private chunks = new Map<string, { body: Body; shape: VoxelShape; x: number; y: number; z: number }>();
 
-  constructor(private velocity: Vec3) {}
+  private limit: number;
+  constructor(private velocity: Vec3, maxFragments = MAX_CARVED_FRAGMENTS) {
+    this.limit = Math.min(MAX_CARVED_FRAGMENTS, Math.max(0,
+      Number.isFinite(maxFragments) ? Math.floor(maxFragments) : MAX_CARVED_FRAGMENTS));
+  }
 
   record(source: Body, shape: VoxelShape, index: number, x: number, y: number, z: number): void {
     if (shape.data[index] === Mat.Foliage) return;
@@ -110,7 +114,7 @@ class RemovedFragments {
     const key = `${shape.id}:${x0}:${y0}:${z0}`;
     let chunk = this.chunks.get(key);
     if (!chunk) {
-      if (this.chunks.size >= MAX_CARVED_FRAGMENTS) return;
+      if (this.chunks.size >= this.limit) return;
       const fragment = new VoxelShape({
         sx: Math.min(n, shape.sx - x0),
         sy: Math.min(n, shape.sy - y0),
@@ -366,7 +370,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
     debris: [],
     center: v3(),
   };
-  const fragments = opts.physicalDebris ? new RemovedFragments(opts.physicalDebris.velocity) : undefined;
+  const fragments = opts.physicalDebris ? new RemovedFragments(opts.physicalDebris.velocity, opts.physicalDebris.maxFragments) : undefined;
 
   let cx = 0;
   let cy = 0;

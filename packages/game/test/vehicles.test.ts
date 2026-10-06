@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Body, Mat, Simulation, VoxelShape, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, VEHICLES, Vehicle, VehicleInput } from '@tvox/game';
+import { roadSim } from './helpers/vehicle-world.js';
 
 const VS = 0.1;
 const drive = (over: Partial<VehicleInput> = {}): VehicleInput => ({
@@ -9,7 +10,7 @@ const drive = (over: Partial<VehicleInput> = {}): VehicleInput => ({
 });
 
 function emptySim(): Simulation {
-  return new Simulation();
+  return roadSim();
 }
 
 /** Стена поперёк движения: машина при yaw=0 едет в -Z. */
@@ -104,9 +105,10 @@ describe('среда обитания', () => {
     expect(boat.speed).toBe(0);
 
     const afloat = new Vehicle('boat', { position: v3(0, 0, 0), waterLevel: 0 });
-    afloat.spawn(sim);
+    const sea = new Simulation();
+    afloat.spawn(sea);
     expect(afloat.inWater).toBe(true);
-    run(afloat, sim, drive({ throttle: 1 }), 1);
+    run(afloat, sea, drive({ throttle: 1 }), 1);
     expect(afloat.speed).toBeGreaterThan(0);
     expect(afloat.position.y).toBe(0);
   });
@@ -253,7 +255,7 @@ describe('вода', () => {
   }
 
   it('целый корпус воду не набирает', () => {
-    const sim = emptySim();
+    const sim = new Simulation();
     const v = boat(sim);
     run(v, sim, drive({ throttle: 1 }), 3);
     expect(v.flooding).toBe(0);
@@ -262,7 +264,7 @@ describe('вода', () => {
   });
 
   it('пробитый корпус набирает воду, садится и теряет ход', () => {
-    const sim = emptySim();
+    const sim = new Simulation();
     const v = boat(sim);
     // Вырезаем четверть корпуса: это уже пробоина, а не царапина.
     const shape = v.body.shapes[0];
@@ -279,7 +281,7 @@ describe('вода', () => {
   });
 
   it('полностью затопленный катер тонет и глохнет', () => {
-    const sim = emptySim();
+    const sim = new Simulation();
     const v = boat(sim);
     const shape = v.body.shapes[0];
     shape.fill({ x0: 0, x1: Math.floor(shape.sx * 0.4) }, Mat.Air);
@@ -292,7 +294,7 @@ describe('вода', () => {
   });
 
   it('машина в воде глохнет насовсем', () => {
-    const sim = emptySim();
+    const sim = new Simulation();
     const car = new Vehicle('car', { position: v3(0, -1, 0), voxelSize: VS, waterLevel: 0 });
     car.spawn(sim);
 

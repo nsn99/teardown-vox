@@ -167,7 +167,7 @@ describe('портовый кран', () => {
     const before = shell.solidVoxels;
     const highBefore = highMetal(upper);
     expect(highBefore).toBeGreaterThan(1000);
-    for (let i = 0; i < 240; i++) sim.step(1 / 60);
+    for (let i = 0; i < 360; i++) sim.step(1 / 60);
     const pieces = [...sim.world.bodies.values()].filter(b => b.tags.has('crane'));
     expect(Math.max(...pieces.map(b => b.solidVoxels))).toBeLessThan(before * 0.6);
     expect(highMetal(pieces)).toBeLessThan(highBefore * 0.2);

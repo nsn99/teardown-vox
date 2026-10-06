@@ -4,6 +4,7 @@ import {
   CHUNK_SIZE,
   SKY_MAX,
   SkyLightField,
+  Transform,
   VoxelRegion,
   VoxelShape,
   VoxelWorld,
@@ -174,6 +175,7 @@ export class VoxelRenderer {
   private chunks = new Map<string, ChunkEntry>();
   private shapeChunks = new Map<number, ChunkEntry[]>();
   private shapeHolders = new Map<number, THREE.Group>();
+  private shapeVisualPoses = new Map<number, Transform>();
   /** Ближайший ремеш идёт целиком, без бюджета: это загрузка уровня. */
   private priming = true;
   private opaqueMaterial: THREE.MeshStandardMaterial;
@@ -775,10 +777,14 @@ export class VoxelRenderer {
    * создании: формы бывают подвижными внутри своего тела — винт вертолёта
    * крутится, а фюзеляж нет.
    */
+  setShapeVisualPose(shapeId: number, pose: Transform): void {
+    this.shapeVisualPoses.set(shapeId, pose);
+  }
+
   private syncShapeTransform(shape: VoxelShape): void {
     const holder = this.shapeHolders.get(shape.id);
     if (!holder) return;
-    const t = shape.transform;
+    const t = this.shapeVisualPoses.get(shape.id) ?? shape.transform;
     holder.position.set(t.position.x, t.position.y, t.position.z);
     holder.quaternion.set(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
   }
@@ -847,6 +853,7 @@ export class VoxelRenderer {
       }
       this.shapeHolders.get(shapeId)?.removeFromParent();
       this.shapeHolders.delete(shapeId);
+      this.shapeVisualPoses.delete(shapeId);
       this.shapeChunks.delete(shapeId);
     }
   }
@@ -1080,6 +1087,7 @@ export class VoxelRenderer {
     }
     this.chunks.clear();
     this.shapeChunks.clear();
+    this.shapeVisualPoses.clear();
     this.opaqueMaterial.dispose();
     this.glassMaterial.dispose();
     this.renderer.dispose();

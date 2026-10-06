@@ -546,6 +546,8 @@ export class Heist {
     } else {
       this.character.update(this.sim.world, input, this.yaw, dt);
     }
+    // Припаркованная техника тоже падает, тонет и получает импульс от столкновения.
+    for (const vehicle of this.vehicles.values()) if (vehicle !== veh) vehicle.update(this.sim, NEUTRAL_INPUT, dt);
 
     // Потолок обломков считает «далеко» от игрока, а не от начала координат:
     // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
