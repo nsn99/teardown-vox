@@ -4,6 +4,7 @@ import {
   Heist,
   LevelSource,
   chaseCamera,
+  cameraUnderwater,
   NEUTRAL_INPUT,
   NEUTRAL_CRANE_INPUT,
   Profile,
@@ -449,7 +450,6 @@ function frame(now: number): void {
     0,
     1,
   );
-  renderer.setAtmosphere({ underwater: h.character.inWater, smoke: haze });
 
   // Дым живёт в симуляции, а частицы — картинка поверх него: берём
   // облака оттуда, а не выдумываем заново.
@@ -460,12 +460,18 @@ function frame(now: number): void {
   }
 
   const shake = h.shakeState;
+  const cameraPosition = add(cameraEye(h), shake.offset);
+  renderer.setAtmosphere({ underwater: cameraUnderwater(h.sim.world, cameraPosition), smoke: haze });
   renderer.setCamera(
-    add(cameraEye(h), shake.offset),
+    cameraPosition,
     h.yaw + shake.yaw,
     h.pitch + shake.pitch,
     shake.roll,
   );
+  for (const vehicle of h.vehicles.values()) {
+    if (vehicle.body.destroyed) continue;
+    for (const wheel of vehicle.wheels) renderer.setShapeVisualPose(wheel.shape.id, wheel.pose);
+  }
   renderer.sync(h.sim.world);
   chargeView.update(h.charges.list());
   renderer.render();

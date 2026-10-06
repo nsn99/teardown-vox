@@ -82,15 +82,16 @@
     },
     {
       "name": "harbour-bed",
+      "voxelSize": 0.5,
       "size": [
         480,
-        3,
-        220
+        1,
+        320
       ],
       "position": [
-        0,
-        -2.1,
-        -22
+        -80,
+        -2.3,
+        -150
       ],
       "grounded": true,
       "structural": false,
@@ -1411,15 +1412,16 @@
       "passive": true,
       "volume": {
         "name": "water",
+        "voxelSize": 1,
         "size": [
-          480,
-          14,
-          320
+          240,
+          2,
+          160
         ],
         "position": [
-          0,
-          -1.8,
-          -22
+          -80,
+          -2.4,
+          -150
         ],
         "grounded": false,
         "structural": false,

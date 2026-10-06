@@ -151,6 +151,22 @@ describe('ворота в формате карты', () => {
 });
 
 describe('формат карты', () => {
+  it('размер сетки отдельного объёма сохраняется при экспорте и повторной загрузке', () => {
+    const doc = tinyDoc();
+    doc.volumes[0].voxelSize = 0.5;
+    const level = levelFromDoc(doc);
+    const sim = new Simulation();
+    const original = level.build(sim)[0].shapes[0];
+    const restored = levelFromDoc(docFromLevel(level, sim)).build(new Simulation())[0].shapes[0];
+    expect(original.voxelSize).toBe(0.5);
+    expect(restored.voxelSize).toBe(0.5);
+    expect(restored.localAabb()).toEqual(original.localAabb());
+    expect(restored.data).toEqual(original.data);
+    for (const value of [0, -0.1, 'bad']) {
+      (doc.volumes[0] as unknown as { voxelSize: unknown }).voxelSize = value;
+      expect(() => parseLevelDoc(doc)).toThrow(/volumes\[0\].voxelSize/);
+    }
+  });
   it('минимальная карта разбирается и собирается', () => {
     const level = levelFromDoc(tinyDoc());
     const sim = new Simulation();

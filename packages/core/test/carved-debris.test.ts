@@ -3,6 +3,17 @@ import { Mat, carve, quatFromEulerYXZ, v3 } from '@tvox/core';
 import { makeShape, voxelCenter, worldWith } from './helpers.js';
 
 describe('физические обломки вырезанного материала', () => {
+  it.each([[8, 8], [0, 0], [100, 32], [Infinity, 32]])('соблюдает лимит %s физических кусков', (limit, expected) => {
+    const shape = makeShape(32, 32, 8);
+    shape.fill({}, Mat.Metal);
+    const { world } = worldWith(shape);
+    const hit = carve(world, { kind: 'sphere', center: voxelCenter(16, 16, 4), radius: 10 }, {
+      power: 1.1, damage: 0, instant: true, falloff: 'none',
+      physicalDebris: { velocity: v3(0, 1, 0), maxFragments: limit },
+    });
+    expect(hit.fragments).toHaveLength(expected);
+    expect(hit.removed).toBe(shape.data.length);
+  });
   it('сохраняет материал, окраску и мировые координаты повёрнутой формы', () => {
     const s = makeShape(8, 4, 4);
     s.fill({}, Mat.Brick);
