@@ -22,6 +22,7 @@ import { Pursuit } from './pursuit.js';
 import { ChargeSystem, PlankBuilder, ToolContext, ToolUseResult, useTool } from './tool-use.js';
 import { CARGO_OFFSET, NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
 import { AutomaticGate } from './gates.js';
+import { CraneInput, NEUTRAL_CRANE_INPUT, PortCrane } from './cranes.js';
 
 export interface HeistOptions {
   level: LevelSource;
@@ -43,6 +44,8 @@ export interface HeistEvents extends Record<string, unknown> {
   'target:stowed': { id: string; vehicle: string };
   'vehicle:entered': { id: string };
   'vehicle:exited': { id: string };
+  'crane:entered': { id: string };
+  'crane:exited': { id: string };
   'trigger:fired': { trigger: TriggerDef };
 }
 
@@ -93,6 +96,7 @@ export class Heist {
   readonly sandbox: boolean;
   readonly vehicles = new Map<string, Vehicle>();
   readonly gates: AutomaticGate[] = [];
+  readonly cranes = new Map<string, PortCrane>();
 
   /** Физические тела целей: id цели → тело в мире. */
   readonly targetBodies = new Map<string, Body>();
@@ -101,6 +105,7 @@ export class Heist {
   pitch = 0;
   /** id техники, в которой сидит игрок. */
   drivingId: string | null = null;
+  operatingId: string | null = null;
   private started = false;
   private resultApplied = false;
 
@@ -163,6 +168,7 @@ export class Heist {
   }
 
   get eye(): Vec3 {
+    if (this.operating) return add(this.operating.seat, v3(0, 1.15, 0));
     if (this.drivingId) {
       const v = this.vehicles.get(this.drivingId);
       if (v) return add(v.position, v3(0, 1.4, 0));
@@ -179,12 +185,22 @@ export class Heist {
     return this.drivingId ? (this.vehicles.get(this.drivingId) ?? null) : null;
   }
 
+  get operating(): PortCrane | null {
+    return this.operatingId ? this.cranes.get(this.operatingId) ?? null : null;
+  }
+
+  get nearbyCrane(): PortCrane | null {
+    if (this.drivingId) return null;
+    return [...this.cranes.values()].find(c => c.canEnter(this.character.position)) ?? null;
+  }
+
   /** Построить уровень и перейти в разведку. */
   start(): void {
     if (this.started) return;
     this.started = true;
     this.level.build(this.sim);
     for (const def of this.level.gates ?? []) this.gates.push(new AutomaticGate(this.sim, def));
+    for (const def of this.level.cranes ?? []) this.cranes.set(def.id, new PortCrane(this.sim, def));
     for (const spawn of this.level.vehicles) {
       const veh = new Vehicle(spawn.kind, {
         position: spawn.position,
@@ -445,6 +461,7 @@ export class Heist {
 
   /** Сесть за руль ближайшей техники / выйти. */
   toggleVehicle(): string | null {
+    if (this.operatingId) return null;
     if (this.drivingId) {
       const veh = this.vehicles.get(this.drivingId)!;
       this.character.teleport(this.exitPosition(veh));
@@ -473,14 +490,49 @@ export class Heist {
     return best;
   }
 
+  /** Сесть за пульт в кабине / встать из кресла, даже после разрушения крана. */
+  toggleCrane(): string | null {
+    const crane = this.operating;
+    if (crane) {
+      const id = this.operatingId!;
+      const exit = crane.exit;
+      // Взрыв мог завалить место у пульта: ищем свободную точку около двери.
+      let chosen = exit;
+      for (const offset of [v3(), v3(0, 0.3, 0), v3(0, 0.8, 0), v3(0, 2.5, 0)]) {
+        chosen = add(exit, offset);
+        if (!overlapsSolid(this.sim.world, this.character.aabbAt(chosen))) break;
+      }
+      this.character.teleport(chosen);
+      this.operatingId = null;
+      this.events.emit('crane:exited', { id });
+      return id;
+    }
+    if (this.drivingId || this.mission.carriedIds.length > 0) return null;
+    const nearby = this.nearbyCrane;
+    if (!nearby) return null;
+    this.operatingId = nearby.def.id;
+    this.character.teleport(nearby.seat);
+    this.yaw = nearby.yaw;
+    this.pitch = -0.25;
+    this.events.emit('crane:entered', { id: nearby.def.id });
+    return nearby.def.id;
+  }
+
   /** Шаг игры. */
-  update(dt: number, input: CharacterInput = DEFAULT_INPUT, vehicleInput: VehicleInput = NEUTRAL_INPUT): void {
+  update(dt: number, input: CharacterInput = DEFAULT_INPUT, vehicleInput: VehicleInput = NEUTRAL_INPUT,
+    craneInput: CraneInput = NEUTRAL_CRANE_INPUT): void {
     if (!this.started) this.start();
 
     this.inventory.tick(dt);
     this.charges.step(this.sim, dt, this.protectedMaterials());
 
     const veh = this.driving;
+    const operator = this.operating;
+    for (const crane of this.cranes.values()) {
+      const yaw = crane.yaw;
+      crane.update(crane === operator ? craneInput : NEUTRAL_CRANE_INPUT, dt);
+      if (crane === operator) this.yaw += Math.atan2(Math.sin(crane.yaw - yaw), Math.cos(crane.yaw - yaw));
+    }
     const visitor = veh ? veh.body.aabb() : this.character.aabbAt(this.character.position);
     for (const gate of this.gates) gate.update(visitor, dt);
     if (veh) {
@@ -488,6 +540,9 @@ export class Heist {
       this.yaw = veh.yaw;
       this.character.teleport(add(veh.position, v3(0, 0.5, 0)));
       if (veh.wrecked) this.toggleVehicle();
+    } else if (operator) {
+      this.character.teleport(operator.seat);
+      if (!operator.operable) this.toggleCrane();
     } else {
       this.character.update(this.sim.world, input, this.yaw, dt);
     }
@@ -496,6 +551,9 @@ export class Heist {
     // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
     this.sim.focus = this.playerPosition;
     this.sim.step(dt);
+    // Отложенный урон и структурный проход могли оборвать крепление в этом же кадре.
+    for (const crane of this.cranes.values()) crane.update(NEUTRAL_CRANE_INPUT, 0);
+    if (this.operating && !this.operating.operable) this.toggleCrane();
     this.shakeState = this.shake.update(dt);
 
     // Несомая цель едет вместе с игроком, чуть впереди на уровне груди.
@@ -567,10 +625,12 @@ export class Heist {
     this.planks.cancel();
     this.resultApplied = false;
     this.drivingId = null;
+    this.operatingId = null;
     this.sim.reset();
     this.targetBodies.clear();
     this.vehicles.clear();
     this.gates.length = 0;
+    this.cranes.clear();
     this.started = false;
     this.start();
   }

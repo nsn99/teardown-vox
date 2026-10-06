@@ -8,6 +8,7 @@ import {
   VoxelShape,
   VoxelWorld,
   regionIsEmpty,
+  transformPoint,
 } from '@tvox/core';
 import { MeshData, meshShape } from './mesher.js';
 import { ChunkSlice, sliceChunk } from './chunk-view.js';
@@ -70,6 +71,7 @@ export type Daylight = 'day' | 'dusk' | 'night';
 /** Источник света уровня: прожектор на кране, лампа над воротами. */
 export interface LevelLight {
   kind: 'point' | 'spot';
+  body?: string;
   position: { x: number; y: number; z: number };
   /** Куда смотрит прожектор. Для точечной лампы не нужно. */
   target?: { x: number; y: number; z: number };
@@ -203,6 +205,7 @@ export class VoxelRenderer {
   private sky = new SkyLightField();
   private hemi: THREE.HemisphereLight;
   private levelLights: THREE.Object3D[] = [];
+  private mountedLights: Array<{ def: LevelLight; light: THREE.Light; target?: THREE.Object3D }> = [];
   /** Лампы с неподвижной тенью: обновляются по перестройке геометрии. */
   private staticShadows: THREE.SpotLight[] = [];
   private lastShadowRefresh = 0;
@@ -480,6 +483,7 @@ export class VoxelRenderer {
       lit.dispose?.();
     }
     this.levelLights = [];
+    this.mountedLights = [];
     this.staticShadows = [];
 
     for (const def of lights) {
@@ -496,19 +500,19 @@ export class VoxelRenderer {
           spot.shadow.camera.far = def.range;
           spot.shadow.bias = -0.0012;
           spot.shadow.normalBias = 0.06;
-          // Лампа неподвижна: её карта теней пересчитывается не каждый
-          // кадр, а когда в мире что-то перестроилось.
           spot.shadow.autoUpdate = false;
           spot.shadow.needsUpdate = true;
           this.staticShadows.push(spot);
         }
         this.scene.add(spot, spot.target);
         this.levelLights.push(spot, spot.target);
+        if (def.body) this.mountedLights.push({ def, light: spot, target: spot.target });
       } else {
         const point = new THREE.PointLight(color, def.intensity, def.range, 1.6);
         point.position.set(def.position.x, def.position.y, def.position.z);
         this.scene.add(point);
         this.levelLights.push(point);
+        if (def.body) this.mountedLights.push({ def, light: point });
       }
     }
   }
@@ -631,6 +635,20 @@ export class VoxelRenderer {
   /** Подтягивает сцену под текущее состояние мира. */
   sync(world: VoxelWorld): void {
     const started = performance.now();
+    for (const { def, light, target } of this.mountedLights) {
+      const body = [...world.bodies.values()].find(b => b.name === def.body && !b.destroyed);
+      light.visible = Boolean(body?.solidVoxels);
+      if (!body) continue;
+      const position = transformPoint(body.transform, def.position);
+      let moved = light.position.x !== position.x || light.position.y !== position.y || light.position.z !== position.z;
+      light.position.set(position.x, position.y, position.z);
+      if (target && def.target) {
+        const aim = transformPoint(body.transform, def.target);
+        moved ||= target.position.x !== aim.x || target.position.y !== aim.y || target.position.z !== aim.z;
+        target.position.set(aim.x, aim.y, aim.z);
+      }
+      if (moved && light instanceof THREE.SpotLight) light.shadow.needsUpdate = true;
+    }
     this.seenShapes.clear();
 
     for (const body of world.bodies.values()) {
