@@ -55,6 +55,8 @@ export interface CarveOptions {
   maxVoxels?: number;
   /** Не трогать эти тела. */
   ignoreBodies?: ReadonlySet<number>;
+  /** Ограничить инструмент отдельными вокселями, например не резать опору под ковшом. */
+  filterVoxel?: (shape: VoxelShape, body: Body, x: number, y: number, z: number) => boolean;
   /** Часть удалённых вокселей становится небольшими физическими обломками. */
   physicalDebris?: { velocity: Vec3; maxFragments?: number };
 }
@@ -100,7 +102,7 @@ class RemovedFragments {
   private chunks = new Map<string, { body: Body; shape: VoxelShape; x: number; y: number; z: number }>();
 
   private limit: number;
-  constructor(private velocity: Vec3, maxFragments = MAX_CARVED_FRAGMENTS) {
+  constructor(private velocity: Vec3, maxFragments = MAX_CARVED_FRAGMENTS, private vehicleChip = false) {
     this.limit = Math.min(MAX_CARVED_FRAGMENTS, Math.max(0,
       Number.isFinite(maxFragments) ? Math.floor(maxFragments) : MAX_CARVED_FRAGMENTS));
   }
@@ -133,7 +135,7 @@ class RemovedFragments {
         transform: { position: { ...source.transform.position }, rotation: { ...source.transform.rotation } },
         shapes: [fragment],
         name: `${source.name}:chip`,
-        tags: ['debris', 'carved-debris'],
+        tags: ['debris', 'carved-debris', ...(this.vehicleChip ? ['vehicle-chip'] : [])],
       });
       body.velocity = add(source.velocity, this.velocity);
       body.angularVelocity = v3(1.2, 0.6, -0.8);
@@ -370,7 +372,8 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
     debris: [],
     center: v3(),
   };
-  const fragments = opts.physicalDebris ? new RemovedFragments(opts.physicalDebris.velocity, opts.physicalDebris.maxFragments) : undefined;
+  const fragments = opts.physicalDebris ? new RemovedFragments(opts.physicalDebris.velocity, opts.physicalDebris.maxFragments,
+    cause === 'ram' || cause === 'bucket' || cause === 'blade') : undefined;
 
   let cx = 0;
   let cy = 0;
@@ -408,6 +411,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             const mat = shape.data[i];
             if (mat === Mat.Air) continue;
             if (opts.protect?.has(mat)) continue;
+            if (opts.filterVoxel && !opts.filterVoxel(shape, body, x, y, z)) continue;
             const def = material(mat);
             if (def.indestructible) continue;
 
@@ -453,6 +457,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
                   if (nx < 0 || ny < 0 || nz < 0 || nx >= shape.sx || ny >= shape.sy || nz >= shape.sz) continue;
                   const next = shape.idx(nx, ny, nz);
                   if (shape.data[next] !== Mat.Glass || seen.has(next)) continue;
+                  if (opts.filterVoxel && !opts.filterVoxel(shape, body, nx, ny, nz)) continue;
                   seen.add(next);
                   queue.push(next);
                 }

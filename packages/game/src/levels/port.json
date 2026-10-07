@@ -185,6 +185,612 @@
       ]
     },
     {
+      "name": "crane-transport-quay",
+      "size": [
+        112,
+        4,
+        44
+      ],
+      "voxelSize": 0.5,
+      "position": [
+        20,
+        -2,
+        -12
+      ],
+      "grounded": true,
+      "structural": false,
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            112,
+            1,
+            44
+          ],
+          "mat": "foundation"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            0,
+            112,
+            4,
+            44
+          ],
+          "mat": "concrete",
+          "color": "#89918f"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            3,
+            4,
+            49,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            58,
+            3,
+            4,
+            59,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            3,
+            4,
+            59,
+            4,
+            5
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            60,
+            3,
+            4,
+            61,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            70,
+            3,
+            4,
+            71,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            60,
+            3,
+            4,
+            71,
+            4,
+            5
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            3,
+            4,
+            73,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            82,
+            3,
+            4,
+            83,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            3,
+            4,
+            83,
+            4,
+            5
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            84,
+            3,
+            4,
+            85,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            94,
+            3,
+            4,
+            95,
+            4,
+            25
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            84,
+            3,
+            4,
+            95,
+            4,
+            5
+          ],
+          "mat": "concrete",
+          "color": "#ddc86c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            3,
+            0,
+            2,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            4,
+            3,
+            0,
+            6,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            8,
+            3,
+            0,
+            10,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            12,
+            3,
+            0,
+            14,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            16,
+            3,
+            0,
+            18,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            20,
+            3,
+            0,
+            22,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            3,
+            0,
+            26,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            28,
+            3,
+            0,
+            30,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            32,
+            3,
+            0,
+            34,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            36,
+            3,
+            0,
+            38,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            40,
+            3,
+            0,
+            42,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            44,
+            3,
+            0,
+            46,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            3,
+            0,
+            50,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            52,
+            3,
+            0,
+            54,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            56,
+            3,
+            0,
+            58,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            60,
+            3,
+            0,
+            62,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            64,
+            3,
+            0,
+            66,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            68,
+            3,
+            0,
+            70,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            3,
+            0,
+            74,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            76,
+            3,
+            0,
+            78,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            80,
+            3,
+            0,
+            82,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            84,
+            3,
+            0,
+            86,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            88,
+            3,
+            0,
+            90,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            92,
+            3,
+            0,
+            94,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            3,
+            0,
+            98,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            100,
+            3,
+            0,
+            102,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            104,
+            3,
+            0,
+            106,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        },
+        {
+          "op": "fill",
+          "box": [
+            108,
+            3,
+            0,
+            110,
+            4,
+            1
+          ],
+          "mat": "concrete",
+          "color": "#d8b342"
+        }
+      ]
+    },
+    {
+      "name": "pier-parking-apron",
+      "size": [
+        32,
+        4,
+        28
+      ],
+      "voxelSize": 0.5,
+      "position": [
+        -12,
+        -2,
+        0
+      ],
+      "grounded": true,
+      "structural": false,
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            32,
+            1,
+            28
+          ],
+          "mat": "foundation"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            0,
+            32,
+            4,
+            28
+          ],
+          "mat": "concrete",
+          "color": "#89918f"
+        }
+      ]
+    },
+    {
       "name": "warehouse",
       "size": [
         200,
@@ -1378,6 +1984,18 @@
         {
           "op": "fill",
           "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            2,
+            25,
+            50
+          ],
+          "mat": "air"
         }
       ]
     },
@@ -2074,11 +2692,11 @@
       "id": "boat",
       "kind": "boat",
       "position": [
-        21.0,
+        12,
         -0.4,
-        4
+        -1.6
       ],
-      "yaw": 0
+      "yaw": 1.5707963267948966
     },
     {
       "id": "dozer",
@@ -2099,6 +2717,16 @@
         50
       ],
       "yaw": -1.5707963267948966
+    },
+    {
+      "id": "cargo-truck",
+      "kind": "truck",
+      "position": [
+        42.8,
+        0.1,
+        5
+      ],
+      "yaw": 0
     }
   ],
   "mission": {
@@ -2221,6 +2849,7 @@
     }
   ],
   "environment": {
+    "backdrop": "port-hills",
     "daylight": "dusk",
     "lights": [
       {

@@ -4,6 +4,8 @@ import { VoxelWorld } from './world.js';
 import { carve } from './destruction.js';
 
 export interface PhysicsBackend {
+  /** Солвер интегрирует вращение и реальные контакты свободных тел. */
+  readonly rigidBodyDynamics?: boolean;
   /** Завести или обновить тело в солвере. */
   sync(body: Body): void;
   remove(body: Body): void;
@@ -185,6 +187,8 @@ export class SimplePhysics implements PhysicsBackend {
     point: Vec3,
     impulse: number,
   ): void {
+    // Падение автомобиля — контакт шасси с покрытием, а не взрыв грунта.
+    if (body.tags.has('vehicle') || other?.tags.has('vehicle') || body.tags.has('vehicle-chip')) return;
     const over = impulse - this.cfg.impactThreshold;
     const radius = Math.min(2.5, 0.15 + over * this.cfg.impactDamageScale);
     const power = Math.min(1.1, 0.25 + over * 3e-4);

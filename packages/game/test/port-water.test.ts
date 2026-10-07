@@ -6,7 +6,7 @@ describe('акватория возле крана и расширенной п�
   let sim: Simulation;
   beforeAll(() => { sim = new Simulation(); portLevel.build(sim); }, 30_000);
 
-  it.each([v3(30, -0.5, -35), v3(60, -0.5, -10), v3(90, -0.5, -20), v3(-20, -0.5, -20)])(
+  it.each([v3(30, -0.5, -35), v3(60, -0.5, -20), v3(90, -0.5, -20), v3(-20, -0.5, -20)])(
     'за прежней границей в точке %j есть вода и морское дно', position => {
       expect(cameraUnderwater(sim.world, position)).toBe(true);
       const bed = sim.world.raycast(v3(position.x, -0.4, position.z), v3(0, -1, 0), {
@@ -29,6 +29,9 @@ describe('акватория возле крана и расширенной п�
   });
 
   it('большая вода занимает меньше вокселей, чем старая гавань', () => {
+    const quay = sim.world.raycast(v3(60, 0.1, -10), v3(0, -1, 0), { maxDistance: 3, filter: mat => mat !== Mat.Water });
+    expect(quay?.material).toBe(Mat.Concrete); expect(quay!.point.y).toBeCloseTo(0, 5);
+    expect(cameraUnderwater(sim.world, v3(60, -0.5, -13))).toBe(true);
     const water = [...sim.world.bodies.values()].find(body => body.tags.has('water'))!.shapes[0];
     expect(water.solidVoxels).toBeLessThan(480 * 14 * 320);
     expect(water.sx * water.voxelSize).toBeGreaterThan(200);

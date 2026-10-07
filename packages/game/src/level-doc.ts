@@ -144,6 +144,7 @@ export type LightDocEntry = Omit<LightDef, 'position' | 'target'> & {
 export interface EnvironmentDoc {
   daylight?: Daylight;
   lights?: LightDocEntry[];
+  backdrop?: 'port-hills';
 }
 export type MissionDoc = Omit<MissionConfig, 'targets' | 'extraction'> & {
   targets: TargetDoc[];
@@ -233,6 +234,7 @@ export const environmentOf = (doc: LevelDoc): EnvironmentDef | undefined =>
   doc.environment
     ? {
         daylight: doc.environment.daylight ?? 'dusk',
+        ...(doc.environment.backdrop ? { backdrop: doc.environment.backdrop } : {}),
         lights: (doc.environment.lights ?? []).map((l): LightDef => {
           const { position, target, ...rest } = l;
           return {
@@ -565,11 +567,13 @@ function parseLight(v: unknown, path: string): LightDocEntry {
 function parseEnvironment(v: unknown, path: string): EnvironmentDoc {
   if (!isObj(v)) fail(path, `ожидался объект окружения, пришло ${show(v)}`);
   const o = v as Record<string, unknown>;
+  if (o.backdrop !== undefined && o.backdrop !== 'port-hills') fail(`${path}.backdrop`, 'ожидался port-hills');
   if (o.daylight !== undefined && !DAYLIGHTS.has(String(o.daylight))) {
     fail(`${path}.daylight`, `ожидался day, dusk или night, пришло ${show(o.daylight)}`);
   }
   return {
     ...(o.daylight === undefined ? {} : { daylight: o.daylight as Daylight }),
+    ...(o.backdrop === undefined ? {} : { backdrop: 'port-hills' as const }),
     ...(Array.isArray(o.lights)
       ? { lights: (o.lights as unknown[]).map((l, i) => parseLight(l, `${path}.lights[${i}]`)) }
       : {}),
@@ -1150,6 +1154,7 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
       ? {
           environment: {
             daylight: level.environment.daylight,
+            ...(level.environment.backdrop ? { backdrop: level.environment.backdrop } : {}),
             lights: level.environment.lights.map((l): LightDocEntry => {
               const { position, target, ...rest } = l;
               return {

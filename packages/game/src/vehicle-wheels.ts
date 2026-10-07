@@ -17,10 +17,10 @@ export function wheelPose(wheel: VehicleWheel, steering: number, roll: number): 
   return { position: sub(wheel.center, rotateVec(rotation, half)), rotation };
 }
 
-export function buildVehicleWheels(kind: 'car' | 'pickup', voxelSize: number, size: Vec3): VehicleWheel[] {
-  const diameter = kind === 'car' ? 7 : 8;
+export function buildVehicleWheels(kind: 'car' | 'pickup' | 'truck', voxelSize: number, size: Vec3): VehicleWheel[] {
+  const diameter = kind === 'car' ? 7 : kind === 'truck' ? 10 : 8;
   const radius = diameter * voxelSize / 2;
-  const axle = kind === 'car' ? [8.5, 30.5] : [9.5, 36.5];
+  const axle = kind === 'car' ? [8.5, 30.5] : kind === 'truck' ? [13, 27, 81] : [9.5, 36.5];
   const wheels: VehicleWheel[] = [];
   for (const [axleIndex, x] of axle.entries()) for (const z of [1.5, size.z - 1.5]) {
     const shape = new VoxelShape({ sx: diameter, sy: diameter, sz: 3, voxelSize, name: `${kind}-wheel` });
@@ -41,7 +41,7 @@ export function buildVehicleWheels(kind: 'car' | 'pickup', voxelSize: number, si
       }
     }
     const center = v3((x - size.x / 2) * voxelSize, radius, (z - size.z / 2) * voxelSize);
-    const wheel: VehicleWheel = { shape, center, radius, steering: axleIndex === 1,
+    const wheel: VehicleWheel = { shape, center, radius, steering: axleIndex === axle.length - 1,
       pose: { position: v3(), rotation: quatFromEulerYXZ(0, 0) } };
     wheel.pose = wheelPose(wheel, 0, 0);
     shape.transform = { position: { ...wheel.pose.position }, rotation: { ...wheel.pose.rotation } };

@@ -83,6 +83,8 @@ describe('карта M: порт', () => {
       'harbour-bed',
       'vehicle-yard-east',
       'vehicle-yard-south',
+      'crane-transport-quay',
+      'pier-parking-apron',
       'warehouse',
       'warehouse-gate-frame',
       'warehouse-gate-apron',
@@ -194,7 +196,7 @@ describe('карта M: порт', () => {
 
   it('вся техника из дизайн-документа расставлена', () => {
     const kinds = new Set(portLevel.vehicles.map((v) => v.kind));
-    expect(kinds).toEqual(new Set(['pickup', 'car', 'boat', 'bulldozer', 'excavator']));
+    expect(kinds).toEqual(new Set(['pickup', 'car', 'boat', 'bulldozer', 'excavator', 'truck']));
   });
 });
 

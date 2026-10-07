@@ -3,7 +3,7 @@ import { Body, Mat, RapierPhysics, Simulation, VoxelShape, v3 } from '@tvox/core
 import { NEUTRAL_INPUT, Vehicle } from '@tvox/game';
 import { roadSim } from './helpers/vehicle-world.js';
 
-function wall(sim: Simulation, material = Mat.Brick) {
+function wall(sim: Simulation, material = Mat.Wood) {
   const shape = new VoxelShape({ sx: 80, sy: 30, sz: 4, voxelSize: 0.1, grounded: true });
   shape.fill({}, material);
   shape.transform.position = v3(-4, 0, -4);
@@ -36,7 +36,8 @@ describe('скол и обломки после тарана', () => {
     const target = wall(sim);
     const car = pickup(sim);
     const position = firstHit(car, sim, target.body);
-    expect(car.position.z).toBeLessThan(position.z);
+    expect(car.position.z).toBeLessThanOrEqual(position.z);
+    expect(Math.abs(car.speed)).toBeLessThan(15);
     const widths = new Set<number>();
     for (let y = 0; y < target.shape.sy; y++) {
       let count = 0;

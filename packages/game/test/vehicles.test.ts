@@ -29,13 +29,14 @@ function run(v: Vehicle, sim: Simulation, input: VehicleInput, seconds: number):
 }
 
 describe('каталог техники', () => {
-  it('пять единиц из дизайн-документа', () => {
+  it('шесть видов техники, включая грузовик', () => {
     expect(Object.keys(VEHICLES).sort()).toEqual([
       'boat',
       'bulldozer',
       'car',
       'excavator',
       'pickup',
+      'truck',
     ]);
   });
 
@@ -122,7 +123,7 @@ describe('среда обитания', () => {
 });
 
 describe('взаимодействие с вокселями', () => {
-  it('на скорости пробивает кирпичную стену', () => {
+  it('кирпичная стена останавливает пикап даже с разгоном', () => {
     const sim = emptySim();
     // Стену ставим с разбегом: чтобы таранить, надо успеть разогнаться.
     const wall = addWall(sim, -25, Mat.Brick);
@@ -130,14 +131,14 @@ describe('взаимодействие с вокселями', () => {
     const v = new Vehicle('pickup', { position: v3(0, 0.1, 0) });
     v.spawn(sim);
     run(v, sim, drive({ throttle: 1 }), 4);
-    expect(v.speed).toBeGreaterThan(VEHICLES.pickup.ramSpeed);
-    expect(wall.solidVoxels).toBeLessThan(before);
-    expect(v.position.z).toBeLessThan(-25);
+    expect(wall.solidVoxels).toBe(before);
+    expect(v.position.z).toBeGreaterThan(-25);
+    expect(v.hullIntegrity).toBeLessThan(1);
   });
 
-  it('таран кирпича оставляет неровный край, а не прямоугольный проём', () => {
+  it('удар в деревянную ограду оставляет неровный скол', () => {
     const sim = emptySim();
-    const wall = addWall(sim, -25, Mat.Brick);
+    const wall = addWall(sim, -25, Mat.Wood);
     const v = new Vehicle('pickup', { position: v3(0, 0.1, 0) });
     v.spawn(sim);
 
