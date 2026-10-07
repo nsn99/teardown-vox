@@ -1,4 +1,11 @@
-import { Vec3, VoxelWorld, add, clamp, normalize, scale, v3 } from '@tvox/core';
+import { Mat, Vec3, VoxelWorld, add, clamp, normalize, scale, v3 } from '@tvox/core';
+import { overlapsMaterial } from './character.js';
+
+/** Вода вокруг самой камеры: мокрые ноги или посадка в катер не включают подводный туман. */
+export function cameraUnderwater(world: VoxelWorld, eye: Vec3): boolean {
+  return overlapsMaterial(world, { min: v3(eye.x - 0.001, eye.y - 0.001, eye.z - 0.001),
+    max: v3(eye.x + 0.001, eye.y + 0.001, eye.z + 0.001) }, Mat.Water);
+}
 
 /**
  * Камера от третьего лица.

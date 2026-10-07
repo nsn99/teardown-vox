@@ -97,6 +97,8 @@ export interface LightDef {
 export interface EnvironmentDef {
   daylight: Daylight;
   lights: LightDef[];
+  /** Дальний пейзаж без вокселей и коллайдеров. */
+  backdrop?: 'port-hills';
 }
 
 /**

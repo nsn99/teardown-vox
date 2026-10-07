@@ -1,5 +1,9 @@
-import { Aabb, Body, Mat, Simulation, Vec3, VoxelShape, aabbOverlaps, add, clamp, v3 } from '@tvox/core';
+import {
+  Aabb, Body, Mat, Simulation, Vec3, VoxelBox, VoxelShape,
+  aabbEmpty, aabbExpand, aabbOverlaps, add, clamp, decomposeToBoxes, transformPoint, v3,
+} from '@tvox/core';
 import { GateDef } from './level.js';
+import { overlapsSolid } from './character.js';
 
 /** Подъёмная створка; датчик работает с обеих сторон и учитывает весь транспорт. */
 export class AutomaticGate {
@@ -8,6 +12,9 @@ export class AutomaticGate {
   private readonly aperture: Aabb;
   private offset = 0;
   private hold = 0;
+  private recoilTo: number | null = null;
+  private retry = 0;
+  private geometry = new Map<VoxelShape, { solids: number; boxes: VoxelBox[] }>();
   private support?: { shape: VoxelShape; index: number };
 
   constructor(private sim: Simulation, readonly def: GateDef) {
@@ -47,12 +54,61 @@ export class AutomaticGate {
     const blocked = this.obstructed();
     if (nearby || blocked) this.hold = this.def.closeDelay;
     else this.hold = Math.max(0, this.hold - dt);
-    const target = nearby || blocked || this.hold > 0 ? this.def.rise : 0;
+    this.retry = Math.max(0, this.retry - dt);
+    if (this.retry === 0) this.recoilTo = null;
+    const recoiling = this.recoilTo !== null;
+    const target = this.recoilTo ?? (nearby || blocked || this.hold > 0 ? this.def.rise : 0);
     const next = this.offset + clamp(target - this.offset, -this.def.speed * dt, this.def.speed * dt);
     if (next === this.offset) return;
-    this.offset = next;
+    const motion = this.motionBoxes();
+    if (this.pathBlocked(motion, this.offset, next)) {
+      // Находим контакт по всему пути, а не только в конце кадра:
+      // даже большой dt не должен перескочить через тонкую доску.
+      let clear = this.offset;
+      let hit = next;
+      for (let i = 0; i < 14; i++) {
+        const middle = (clear + hit) / 2;
+        if (this.pathBlocked(motion, this.offset, middle)) hit = middle;
+        else clear = middle;
+      }
+      this.recoilTo = recoiling ? clear : clamp(clear - Math.sign(next - this.offset) * 0.15, 0, this.def.rise);
+      this.retry = Math.max(0.5, this.def.closeDelay);
+      this.offset = clear;
+    } else this.offset = next;
     this.body.transform.position = add(this.closed, v3(0, this.offset, 0));
     this.sim.physics.sync(this.body);
+  }
+
+  /** Боксы только оставшихся вокселей створки, в её закрытом положении. */
+  private motionBoxes(): Aabb[] {
+    const boxes: Aabb[] = [];
+    const transform = { ...this.body.transform, position: this.closed };
+    for (const shape of this.body.shapes) {
+      let cached = this.geometry.get(shape);
+      if (!cached || cached.solids !== shape.solidVoxels) {
+        cached = { solids: shape.solidVoxels, boxes: decomposeToBoxes(shape, { maxBoxes: Infinity }) };
+        this.geometry.set(shape, cached);
+      }
+      for (const b of cached.boxes) {
+        const box = aabbEmpty();
+        for (let i = 0; i < 8; i++) {
+          const p = v3(i & 1 ? b.x1 : b.x0, i & 2 ? b.y1 : b.y0, i & 4 ? b.z1 : b.z0);
+          p.x *= shape.voxelSize; p.y *= shape.voxelSize; p.z *= shape.voxelSize;
+          aabbExpand(box, transformPoint(transform, transformPoint(shape.transform, p)));
+        }
+        boxes.push(box);
+      }
+    }
+    return boxes;
+  }
+
+  private pathBlocked(boxes: Aabb[], from: number, to: number): boolean {
+    const ignore = new Set([this.body.id]);
+    for (const body of this.sim.world.bodies.values()) if (body.passive) ignore.add(body.id);
+    return boxes.some(box => overlapsSolid(this.sim.world, {
+      min: add(box.min, v3(0, Math.min(from, to), 0)),
+      max: add(box.max, v3(0, Math.max(from, to), 0)),
+    }, ignore));
   }
 
   private obstructed(): boolean {

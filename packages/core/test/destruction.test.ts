@@ -17,6 +17,15 @@ const TOOL = {
 } as const;
 
 describe('carve: модель «сила против прочности»', () => {
+  it('ограничение инструмента защищает нижние воксели даже при распространении трещины в стекле', () => {
+    const shape = makeShape(5, 12, 1); shape.fill({}, Mat.Glass);
+    const { world } = worldWith(shape);
+    const result = carve(world, { kind: 'sphere', center: voxelCenter(2, 8, 0), radius: 0.1 }, {
+      power: 0.35, damage: 1, filterVoxel: (_shape, _body, _x, y) => y >= 6,
+    });
+    expect(result.removed).toBe(30); expect(shape.get(2, 5, 0)).toBe(Mat.Glass);
+    expect(shape.get(2, 6, 0)).toBe(Mat.Air);
+  });
   it('стекло рассыпается связанным листом, соседний лист остаётся целым', () => {
     const s = makeShape(12, 12, 3);
     s.fill({x1: 5, z1: 1}, Mat.Glass);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Body, Mat, VoxelShape, VoxelWorld, v3 } from '@tvox/core';
-import { CameraShake, chaseCamera, lookDirection } from '@tvox/game';
+import { CameraShake, chaseCamera, cameraUnderwater, lookDirection } from '@tvox/game';
 
 /**
  * Камера от третьего лица.
@@ -21,6 +21,21 @@ function wallWorld(z0: number): VoxelWorld {
 }
 
 const OPTS = { distance: 6, height: 1, margin: 0.35, minDistance: 0.6 };
+
+describe('подводный туман', () => {
+  it('включается только внутри воды, а над поверхностью и за границей акватории выключен', () => {
+    const world = new VoxelWorld();
+    const water = new VoxelShape({ sx: 40, sy: 10, sz: 40, voxelSize: 0.5 });
+    water.fill({}, Mat.Water);
+    water.transform.position = v3(-10, -5, -10);
+    world.addBody(new Body({ kind: 'static', passive: true, shapes: [water], tags: ['water'] }));
+    expect(cameraUnderwater(world, v3(0, -0.5, 0))).toBe(true);
+    expect(cameraUnderwater(world, v3(0, 1.4, 0))).toBe(false);
+    expect(cameraUnderwater(world, v3(12, -0.5, 0))).toBe(false);
+    const behindBoat = chaseCamera(world, v3(0, 1.4, 0), 0, 0, { distance: 7, height: 1.2 });
+    expect(cameraUnderwater(world, behindBoat)).toBe(false);
+  });
+});
 
 describe('камера от третьего лица', () => {
   it('на открытом месте отъезжает на заданное расстояние', () => {

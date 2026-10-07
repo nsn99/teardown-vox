@@ -20,7 +20,7 @@ import { Mission, MissionResult } from './mission.js';
 import { Profile } from './progression.js';
 import { Pursuit } from './pursuit.js';
 import { ChargeSystem, PlankBuilder, ToolContext, ToolUseResult, useTool } from './tool-use.js';
-import { CARGO_OFFSET, NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
+import { NEUTRAL_INPUT, Vehicle, VehicleInput } from './vehicles.js';
 import { AutomaticGate } from './gates.js';
 import { CraneInput, NEUTRAL_CRANE_INPUT, PortCrane } from './cranes.js';
 
@@ -171,7 +171,7 @@ export class Heist {
     if (this.operating) return add(this.operating.seat, v3(0, 1.15, 0));
     if (this.drivingId) {
       const v = this.vehicles.get(this.drivingId);
-      if (v) return add(v.position, v3(0, 1.4, 0));
+      if (v) return v.driverEye;
     }
     return this.character.eye;
   }
@@ -245,7 +245,7 @@ export class Heist {
     for (const [id, veh] of this.vehicles) {
       const stowed = this.mission.stowedIn(id);
       if (stowed.length === 0) continue;
-      const at = add(veh.position, v3(CARGO_OFFSET.x, CARGO_OFFSET.y, CARGO_OFFSET.z));
+      const at = veh.cargoPosition;
 
       if (veh.wrecked) {
         for (const t of stowed) {
@@ -291,7 +291,7 @@ export class Heist {
         veh.position.z - from.z,
       );
       if (d > REACH + 1.6) continue;
-      const at = add(veh.position, v3(CARGO_OFFSET.x, CARGO_OFFSET.y, CARGO_OFFSET.z));
+      const at = veh.cargoPosition;
       if (!this.mission.stow(carried, id, at)) continue;
       veh.cargo.add(carried);
       this.placeTargetBody(carried, at, true);
@@ -546,11 +546,15 @@ export class Heist {
     } else {
       this.character.update(this.sim.world, input, this.yaw, dt);
     }
+    // Припаркованная техника тоже падает, тонет и получает импульс от столкновения.
+    for (const vehicle of this.vehicles.values()) if (vehicle !== veh) vehicle.update(this.sim, NEUTRAL_INPUT, dt);
 
     // Потолок обломков считает «далеко» от игрока, а не от начала координат:
     // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
     this.sim.focus = this.playerPosition;
     this.sim.step(dt);
+    for (const vehicle of this.vehicles.values()) vehicle.afterPhysics();
+    if (veh) this.character.teleport(add(veh.position, v3(0, 0.5, 0)));
     // Отложенный урон и структурный проход могли оборвать крепление в этом же кадре.
     for (const crane of this.cranes.values()) crane.update(NEUTRAL_CRANE_INPUT, 0);
     if (this.operating && !this.operating.operable) this.toggleCrane();

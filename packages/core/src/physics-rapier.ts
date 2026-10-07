@@ -88,6 +88,7 @@ interface Entry {
  * не зависят от WASM, а браузер получает настоящую физику твёрдых тел.
  */
 export class RapierPhysics implements PhysicsBackend {
+  readonly rigidBodyDynamics = true;
   private cfg: Required<RapierPhysicsOptions>;
   private entries = new Map<number, Entry>();
   private rapierWorld: import('@dimforge/rapier3d-compat').World;
@@ -156,6 +157,7 @@ export class RapierPhysics implements PhysicsBackend {
       ? this.RAPIER.RigidBodyType.KinematicPositionBased : this.RAPIER.RigidBodyType.Dynamic;
     if (existing.rb.bodyType() !== type) {
       existing.rb.setBodyType(type, true);
+      if (body.tags.has('vehicle')) existing.rb.enableCcd(!body.kinematic);
       if (body.kind === 'dynamic' && !body.kinematic) {
         existing.rb.setLinvel(body.velocity, true);
         existing.rb.setAngvel(body.angularVelocity, true);
@@ -197,6 +199,7 @@ export class RapierPhysics implements PhysicsBackend {
     );
     desc.setRotation(body.transform.rotation);
     const rb = this.rapierWorld.createRigidBody(desc);
+    if (body.tags.has('vehicle')) rb.enableCcd(true);
     (rb as unknown as { userData: number }).userData = body.id;
 
     const entry: Entry = {
@@ -512,6 +515,10 @@ export class RapierPhysics implements PhysicsBackend {
         impulse,
         normal,
       });
+
+      // Кузов отскакивает и вращается в солвере. Контакт автомобиля с
+      // полом не запускает сферическое вырезание карты под колёсами.
+      if (a?.tags.has('vehicle') || b?.tags.has('vehicle') || body.tags.has('vehicle-chip')) return;
 
       const over = impulse - this.cfg.impactThreshold;
       const radius = Math.min(2.5, 0.15 + over * this.cfg.impactDamageScale);

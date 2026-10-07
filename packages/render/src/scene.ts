@@ -4,6 +4,7 @@ import {
   CHUNK_SIZE,
   SKY_MAX,
   SkyLightField,
+  Transform,
   VoxelRegion,
   VoxelShape,
   VoxelWorld,
@@ -14,6 +15,8 @@ import { MeshData, meshShape } from './mesher.js';
 import { ChunkSlice, sliceChunk } from './chunk-view.js';
 import { MesherPool, RemeshResult } from './mesher-pool.js';
 import { RemeshQueue } from './remesh-queue.js';
+import { MovingTracks, TrackMotion } from './vehicle-tracks.js';
+import { createPortBackdrop, disposePortBackdrop } from './port-backdrop.js';
 
 /** Ключ чанка по координатам сетки. Сдвиг — чтобы -1 не схлопывался с 1. */
 const key3 = (x: number, y: number, z: number): number =>
@@ -174,6 +177,10 @@ export class VoxelRenderer {
   private chunks = new Map<string, ChunkEntry>();
   private shapeChunks = new Map<number, ChunkEntry[]>();
   private shapeHolders = new Map<number, THREE.Group>();
+  private shapeVisualPoses = new Map<number, Transform>();
+  private trackMotions = new Map<number, readonly TrackMotion[]>();
+  private movingTracks = new Map<number, MovingTracks>();
+  private backdrop?: THREE.Group;
   /** Ближайший ремеш идёт целиком, без бюджета: это загрузка уровня. */
   private priming = true;
   private opaqueMaterial: THREE.MeshStandardMaterial;
@@ -666,6 +673,14 @@ export class VoxelRenderer {
         body.transform.rotation.z,
         body.transform.rotation.w,
       );
+      const tracks = this.trackMotions.get(body.id);
+      if (tracks) {
+        let moving = this.movingTracks.get(body.id);
+        if (!moving) {
+          moving = new MovingTracks(tracks); group.add(moving.group); this.movingTracks.set(body.id, moving);
+        }
+        moving.update(tracks);
+      }
 
       for (const shape of body.shapes) {
         this.seenShapes.add(shape.id);
@@ -775,10 +790,26 @@ export class VoxelRenderer {
    * создании: формы бывают подвижными внутри своего тела — винт вертолёта
    * крутится, а фюзеляж нет.
    */
+  setShapeVisualPose(shapeId: number, pose: Transform): void {
+    this.shapeVisualPoses.set(shapeId, pose);
+  }
+
+  setVehicleTracks(bodyId: number, tracks: readonly TrackMotion[]): void {
+    this.trackMotions.set(bodyId, tracks);
+  }
+
+  setBackdrop(kind?: 'port-hills'): void {
+    if (this.backdrop) disposePortBackdrop(this.backdrop);
+    this.backdrop = kind ? createPortBackdrop() : undefined;
+    if (this.backdrop) {
+      this.scene.add(this.backdrop); this.camera.far = 600; this.camera.updateProjectionMatrix();
+    }
+  }
+
   private syncShapeTransform(shape: VoxelShape): void {
     const holder = this.shapeHolders.get(shape.id);
     if (!holder) return;
-    const t = shape.transform;
+    const t = this.shapeVisualPoses.get(shape.id) ?? shape.transform;
     holder.position.set(t.position.x, t.position.y, t.position.z);
     holder.quaternion.set(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w);
   }
@@ -847,6 +878,7 @@ export class VoxelRenderer {
       }
       this.shapeHolders.get(shapeId)?.removeFromParent();
       this.shapeHolders.delete(shapeId);
+      this.shapeVisualPoses.delete(shapeId);
       this.shapeChunks.delete(shapeId);
     }
   }
@@ -857,6 +889,7 @@ export class VoxelRenderer {
       if (body && !body.destroyed) continue;
       this.scene.remove(group);
       this.groups.delete(bodyId);
+      this.movingTracks.get(bodyId)?.dispose(); this.movingTracks.delete(bodyId); this.trackMotions.delete(bodyId);
     }
   }
 
@@ -1071,6 +1104,9 @@ export class VoxelRenderer {
   }
 
   dispose(): void {
+    if (this.backdrop) disposePortBackdrop(this.backdrop);
+    for (const tracks of this.movingTracks.values()) tracks.dispose();
+    this.movingTracks.clear(); this.trackMotions.clear();
     this.pool?.dispose();
     this.pool = undefined;
     this.queue = undefined;
@@ -1080,6 +1116,7 @@ export class VoxelRenderer {
     }
     this.chunks.clear();
     this.shapeChunks.clear();
+    this.shapeVisualPoses.clear();
     this.opaqueMaterial.dispose();
     this.glassMaterial.dispose();
     this.renderer.dispose();

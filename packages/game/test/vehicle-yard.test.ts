@@ -3,7 +3,7 @@ import { Mat, Simulation, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, Vehicle, VehicleKind, portLevel } from '@tvox/game';
 import { overlapsMaterial, overlapsSolid } from '../src/character.js';
 
-const land: VehicleKind[] = ['car', 'pickup', 'bulldozer', 'excavator'];
+const land: VehicleKind[] = ['car', 'pickup', 'bulldozer', 'excavator', 'truck'];
 let sim: Simulation;
 
 function parkVehicles(): Vehicle[] {
@@ -69,7 +69,7 @@ describe('пространство для транспорта в порту', (
 
   it.each(land)('%s делает полный круг на площадке без задевания препятствий', kind => {
     parkVehicles();
-    const vehicle = new Vehicle(kind, { position: v3(54, 0.1, 47), waterLevel: portLevel.waterLevel });
+    const vehicle = new Vehicle(kind, { position: v3(48, 0.1, 12), waterLevel: portLevel.waterLevel });
     vehicle.spawn(sim);
     vehicle.speed = vehicle.spec.maxSpeed * 0.5;
     const before = sim.world.totalSolidVoxels();
@@ -80,7 +80,7 @@ describe('пространство для транспорта в порту', (
     }
     expectFree(vehicle);
     expect(Math.abs(vehicle.yaw)).toBeGreaterThanOrEqual(Math.PI * 2);
-    expect(Math.hypot(vehicle.position.x - 54, vehicle.position.z - 47)).toBeLessThan(0.3);
+    expect(Math.hypot(vehicle.position.x - 48, vehicle.position.z - 12)).toBeLessThan(0.3);
     expect(sim.world.totalSolidVoxels()).toBe(before);
   });
 
@@ -95,7 +95,7 @@ describe('пространство для транспорта в порту', (
 
   it('катер разворачивается перед причалом, оставаясь всем корпусом над водой', () => {
     parkVehicles();
-    const boat = new Vehicle('boat', { position: v3(26, portLevel.waterLevel, -12), waterLevel: portLevel.waterLevel });
+    const boat = new Vehicle('boat', { position: v3(12, portLevel.waterLevel, -25), waterLevel: portLevel.waterLevel });
     boat.spawn(sim);
     boat.speed = boat.spec.maxSpeed * 0.5;
     const steps = Math.ceil(Math.PI * 2 / boat.spec.turnRate * 60);
@@ -105,6 +105,6 @@ describe('пространство для транспорта в порту', (
     }
     expectFree(boat);
     expect(Math.abs(boat.yaw)).toBeGreaterThanOrEqual(Math.PI * 2);
-    expect(Math.hypot(boat.position.x - 26, boat.position.z + 12)).toBeLessThan(0.3);
+    expect(Math.hypot(boat.position.x - 12, boat.position.z + 25)).toBeLessThan(0.3);
   });
 });

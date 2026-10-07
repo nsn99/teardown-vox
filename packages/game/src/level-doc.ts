@@ -89,6 +89,8 @@ export interface VolumeDoc {
   name: string;
   /** Размер в вокселях. */
   size: Vec3Doc;
+  /** По умолчанию сетка карты; вода и дно могут использовать более крупную сетку. */
+  voxelSize?: number;
   /** Положение в метрах, мировые координаты. */
   position: Vec3Doc;
   /** Форма стоит на земле (влияет на структурный анализ). */
@@ -142,6 +144,7 @@ export type LightDocEntry = Omit<LightDef, 'position' | 'target'> & {
 export interface EnvironmentDoc {
   daylight?: Daylight;
   lights?: LightDocEntry[];
+  backdrop?: 'port-hills';
 }
 export type MissionDoc = Omit<MissionConfig, 'targets' | 'extraction'> & {
   targets: TargetDoc[];
@@ -231,6 +234,7 @@ export const environmentOf = (doc: LevelDoc): EnvironmentDef | undefined =>
   doc.environment
     ? {
         daylight: doc.environment.daylight ?? 'dusk',
+        ...(doc.environment.backdrop ? { backdrop: doc.environment.backdrop } : {}),
         lights: (doc.environment.lights ?? []).map((l): LightDef => {
           const { position, target, ...rest } = l;
           return {
@@ -417,9 +421,12 @@ function parseVolume(v: unknown, path: string): VolumeDoc {
     int(n, `${path}.size[${i}]`, 1),
   ) as Vec3Doc;
   if (!Array.isArray(o.ops)) fail(`${path}.ops`, 'ожидался список операций');
+  const voxelSize = o.voxelSize === undefined ? undefined : num(o.voxelSize, `${path}.voxelSize`);
+  if (voxelSize !== undefined && voxelSize <= 0) fail(`${path}.voxelSize`, 'размер вокселя должен быть положительным');
   return {
     name: str(o.name, `${path}.name`),
     size,
+    ...(voxelSize === undefined ? {} : { voxelSize }),
     position: vec3(o.position, `${path}.position`),
     grounded: o.grounded === undefined ? true : Boolean(o.grounded),
     structural: o.structural === undefined ? true : Boolean(o.structural),
@@ -560,11 +567,13 @@ function parseLight(v: unknown, path: string): LightDocEntry {
 function parseEnvironment(v: unknown, path: string): EnvironmentDoc {
   if (!isObj(v)) fail(path, `ожидался объект окружения, пришло ${show(v)}`);
   const o = v as Record<string, unknown>;
+  if (o.backdrop !== undefined && o.backdrop !== 'port-hills') fail(`${path}.backdrop`, 'ожидался port-hills');
   if (o.daylight !== undefined && !DAYLIGHTS.has(String(o.daylight))) {
     fail(`${path}.daylight`, `ожидался day, dusk или night, пришло ${show(o.daylight)}`);
   }
   return {
     ...(o.daylight === undefined ? {} : { daylight: o.daylight as Daylight }),
+    ...(o.backdrop === undefined ? {} : { backdrop: 'port-hills' as const }),
     ...(Array.isArray(o.lights)
       ? { lights: (o.lights as unknown[]).map((l, i) => parseLight(l, `${path}.lights[${i}]`)) }
       : {}),
@@ -731,7 +740,7 @@ function parseCrane(value: unknown, path: string, volumes: VolumeDoc[], props: P
   }
   const ropes = { body: ropesProp.name, columns, length: positive(ropesRaw.length, 'ropes.length'),
     min: positive(ropesRaw.min, 'ropes.min'), max: positive(ropesRaw.max, 'ropes.max') };
-  if (ropes.min > ropes.length || ropes.length > ropes.max || ropes.max > ropesProp.volume.size[1] * voxelSize) {
+  if (ropes.min > ropes.length || ropes.length > ropes.max || ropes.max > ropesProp.volume.size[1] * (ropesProp.volume.voxelSize ?? voxelSize)) {
     fail(`${path}.ropes.length`, 'длина и пределы троса должны помещаться в форму');
   }
   const stayRaw = object('stay');
@@ -833,7 +842,7 @@ export function buildVolume(doc: VolumeDoc, voxelSize: number): VoxelShape {
     sx,
     sy,
     sz,
-    voxelSize,
+    voxelSize: doc.voxelSize ?? voxelSize,
     grounded: doc.grounded ?? true,
     name: doc.name,
   });
@@ -1145,6 +1154,7 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
       ? {
           environment: {
             daylight: level.environment.daylight,
+            ...(level.environment.backdrop ? { backdrop: level.environment.backdrop } : {}),
             lights: level.environment.lights.map((l): LightDocEntry => {
               const { position, target, ...rest } = l;
               return {
@@ -1163,6 +1173,7 @@ function snapshotVolume(s: VoxelShape): VolumeDoc {
   return {
     name: s.name,
     size: [s.sx, s.sy, s.sz],
+    voxelSize: s.voxelSize,
     position: [s.transform.position.x, s.transform.position.y, s.transform.position.z],
     grounded: s.grounded,
     structural: s.structural,

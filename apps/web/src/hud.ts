@@ -107,6 +107,15 @@ export class Hud {
         (crane.load ? `Груз: ${crane.load.name}\n` : 'Груз не зацеплен\n') +
         'A/D — поворот · W/S — стрела · Пробел/Ctrl — крюк\nE — зацепить/отпустить · V — общий вид · F — встать';
     } else if (!this.crane.hidden) this.crane.textContent = 'F — сесть за пульт крана';
+    const vehicle = heist.driving;
+    if (vehicle?.deck) {
+      this.crane.hidden = false;
+      this.crane.textContent = `ГРУЗОВИК · закреплено грузов: ${vehicle.deck.count}\n` +
+        'Опустите груз краном на платформу\nE — закрепить/освободить · G — освободить груз · F — выйти';
+    } else if (vehicle?.spec.blade) {
+      this.crane.hidden = false;
+      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nУдерживайте Пробел — работать ковшом · Ctrl — тормоз · F — выйти`;
+    }
 
     if (this.hintTimer > 0) {
       this.hintTimer -= dt;

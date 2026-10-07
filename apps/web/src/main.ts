@@ -4,6 +4,7 @@ import {
   Heist,
   LevelSource,
   chaseCamera,
+  cameraUnderwater,
   NEUTRAL_INPUT,
   NEUTRAL_CRANE_INPUT,
   Profile,
@@ -133,6 +134,7 @@ function startRun(inSandbox: boolean): void {
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
   renderer.prime();
+  renderer.setBackdrop(level.environment?.backdrop);
   renderer.setDaylight(level.environment?.daylight ?? 'dusk');
   renderer.setLevelLights(level.environment?.lights ?? []);
   wireEvents(heist);
@@ -254,6 +256,11 @@ function handleActions(h: Heist): void {
       const messages = { attached: 'Груз зацеплен', released: 'Груз отпущен', empty: 'Подведите крюк ближе к ящику или обломку',
         overweight: 'Груз тяжелее 12 тонн', broken: 'Подъёмный механизм повреждён' };
       hud.message(messages[result], 2);
+    } else if (h.driving?.deck && h.mission.carriedIds.length === 0) {
+      const result = h.driving.deck.toggle(h.sim);
+      const messages = { secured: 'Груз закреплён на платформе', released: 'Груз освобождён',
+        empty: 'Опустите груз краном на платформу и нажмите E', moving: 'Остановите грузовик для работы с грузом' };
+      hud.message(messages[result], 2);
     } else {
       const stowed = h.stow();
       if (stowed) {
@@ -266,7 +273,7 @@ function handleActions(h: Heist): void {
   }
 
   if (input.take('KeyG') && h.drivingId) {
-    const n = h.unloadCargo(h.drivingId);
+    const n = h.unloadCargo(h.drivingId) + (h.driving?.deck?.release(h.sim) ?? 0);
     if (n > 0) hud.message(`Выгружено: ${n}`, 1.5);
   }
 
@@ -449,7 +456,6 @@ function frame(now: number): void {
     0,
     1,
   );
-  renderer.setAtmosphere({ underwater: h.character.inWater, smoke: haze });
 
   // Дым живёт в симуляции, а частицы — картинка поверх него: берём
   // облака оттуда, а не выдумываем заново.
@@ -460,12 +466,19 @@ function frame(now: number): void {
   }
 
   const shake = h.shakeState;
+  const cameraPosition = add(cameraEye(h), shake.offset);
+  renderer.setAtmosphere({ underwater: cameraUnderwater(h.sim.world, cameraPosition), smoke: haze });
   renderer.setCamera(
-    add(cameraEye(h), shake.offset),
+    cameraPosition,
     h.yaw + shake.yaw,
     h.pitch + shake.pitch,
     shake.roll,
   );
+  for (const vehicle of h.vehicles.values()) {
+    if (vehicle.body.destroyed) continue;
+    for (const wheel of vehicle.wheels) renderer.setShapeVisualPose(wheel.shape.id, wheel.pose);
+    if (vehicle.tracks.length) renderer.setVehicleTracks(vehicle.body.id, vehicle.tracks);
+  }
   renderer.sync(h.sim.world);
   chargeView.update(h.charges.list());
   renderer.render();

@@ -8,13 +8,27 @@ import {
   add,
   carve,
   clamp,
+  dot,
+  length,
   quatFromEulerYXZ,
   scale,
+  sub,
+  transformPoint,
+  inverseTransformPoint,
+  rotateVec,
+  rotateVecInverse,
   v3,
 } from '@tvox/core';
 import { overlapsSolid } from './character.js';
+import { VehicleFootprint, dentVehicle, vehicleContact, vehicleContactPoint } from './vehicle-contact.js';
+import { VehicleWheel, buildVehicleWheels, wheelPose } from './vehicle-wheels.js';
+import { vehicleOrientation, vehicleSupport } from './vehicle-support.js';
+import { TruckDeck } from './truck-deck.js';
+import { VehicleTrack, buildVehicleTracks } from './vehicle-tracks.js';
 
-export type VehicleKind = 'car' | 'pickup' | 'boat' | 'excavator' | 'bulldozer';
+const vehicleBodies = new WeakMap<Body, Vehicle>();
+
+export type VehicleKind = 'car' | 'pickup' | 'truck' | 'boat' | 'excavator' | 'bulldozer';
 
 export interface VehicleSpec {
   kind: VehicleKind;
@@ -36,7 +50,7 @@ export interface VehicleSpec {
   amphibious: boolean;
   /**
    * Отвал/ковш: сила и радиус прорезания вокселей впереди.
-   * Обычная машина пробивает стену только на скорости, бульдозер — всегда.
+   * Работает только при удержании кнопки; не вырезает опору под машиной.
    */
   blade: { power: number; halfWidth: number; halfHeight: number; reach: number } | null;
   /** Скорость, ниже которой обычный корпус уже ничего не ломает. */
@@ -44,6 +58,11 @@ export interface VehicleSpec {
 }
 
 export const VEHICLES: Record<VehicleKind, VehicleSpec> = {
+  truck: {
+    kind: 'truck', name: 'Грузовик', size: { x: 96, y: 29, z: 28 }, material: Mat.Metal,
+    maxSpeed: 14, reverseSpeed: 5, accel: 3.5, brake: 9, turnRate: 0.65,
+    aquatic: false, amphibious: false, blade: null, ramSpeed: 10,
+  },
   car: {
     kind: 'car',
     name: 'Легковая',
@@ -101,7 +120,7 @@ export const VEHICLES: Record<VehicleKind, VehicleSpec> = {
     turnRate: 1.0,
     aquatic: false,
     amphibious: false,
-    blade: { power: 0.62, halfWidth: 0.9, halfHeight: 0.7, reach: 2.2 },
+    blade: { power: 1.1, halfWidth: 0.9, halfHeight: 0.7, reach: 2.2 },
     ramSpeed: 3,
   },
   bulldozer: {
@@ -116,7 +135,7 @@ export const VEHICLES: Record<VehicleKind, VehicleSpec> = {
     turnRate: 0.9,
     aquatic: false,
     amphibious: false,
-    blade: { power: 0.68, halfWidth: 1.5, halfHeight: 0.9, reach: 1.6 },
+    blade: { power: 1.1, halfWidth: 1.5, halfHeight: 0.9, reach: 1.6 },
     ramSpeed: 2,
   },
 };
@@ -188,13 +207,30 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
   shape.fill({}, Mat.Air);
 
   switch (kind) {
-    case 'car': {
-      // Колёса выступают ниже и шире кузова.
-      for (const wx of [5, 27]) {
-        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 4, z0: 0, z1: 3 }, material);
-        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 4, z0: z - 3, z1: z }, material);
+    case 'truck': {
+      shape.fill({ x0: 2, x1: 95, y0: 5, y1: 9, z0: 5, z1: z - 5 }, material);
+      // Длинная открытая платформа: кран опускает груз сверху.
+      shape.fill({ x0: 2, x1: 66, y0: 10, y1: 12, z0: 1, z1: z - 1 }, material);
+      shape.fill({ x0: 2, x1: 66, y0: 12, y1: 16, z0: 0, z1: 1 }, material);
+      shape.fill({ x0: 2, x1: 66, y0: 12, y1: 16, z0: z - 1, z1: z }, material);
+      shape.fill({ x0: 2, x1: 3, y0: 12, y1: 16, z0: 1, z1: z - 1 }, material);
+      shape.fill({ x0: 64, x1: 66, y0: 12, y1: 22, z0: 1, z1: z - 1 }, material);
+      addVehicleCabin(shape, material, 67, 94, 9, y, 1, z - 1);
+      shape.fill({ x0: 93, x1: x, y0: 5, y1: 10, z0: 1, z1: z - 1 }, material);
+      for (let by = 0; by < y; by++) for (let bz = 0; bz < z; bz++) for (let bx = 0; bx < x; bx++) {
+        const index = shape.idx(bx, by, bz);
+        if (shape.data[index] === Mat.Air || shape.data[index] === Mat.Glass) continue;
+        shape.paint.set(index, 0x1000000 | (bx >= 67 && by >= 10 ? 0xcb543c : by >= 12 ? 0x8295a2 : 0x394b57));
       }
-
+      for (const bz of [3, z - 5]) {
+        shape.fill({ x0: 94, x1: 96, y0: 7, y1: 9, z0: bz, z1: bz + 2 }, Mat.Plastic);
+        for (let by = 7; by < 9; by++) for (let b = bz; b < bz + 2; b++) for (let bx = 94; bx < 96; bx++) {
+          shape.paint.set(shape.idx(bx, by, b), 0x1f5d58a);
+        }
+      }
+      break;
+    }
+    case 'car': {
       // Рама и нижняя часть кузова.
       shape.fill({ x0: 1, x1: x - 1, y0: 3, y1: 7, z0: 2, z1: z - 2 }, material);
 
@@ -207,11 +243,6 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
     }
 
     case 'pickup': {
-      for (const wx of [6, 33]) {
-        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 5, z0: 0, z1: 3 }, material);
-        shape.fill({ x0: wx, x1: wx + 7, y0: 0, y1: 5, z0: z - 3, z1: z }, material);
-      }
-
       shape.fill({ x0: 1, x1: x - 1, y0: 4, y1: 8, z0: 2, z1: z - 2 }, material);
 
       // Открытый грузовой кузов с низким полом и тремя бортами.
@@ -333,14 +364,15 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
 /**
  * Управляемая техника.
  *
- * Кинематическая модель: позиция, курс, скорость вдоль курса. Аркадно,
- * зато предсказуемо и не разваливается, когда под колёсами исчезает
- * половина уровня. Взаимодействие с вокселями — главное: на скорости
- * корпус пробивает стену, а отвал бульдозера расчищает завал стоя.
+ * Управление мотором сочетается с опорой на воксели, падением и обменом
+ * импульсом между кузовами. Столкновение сминает панели в точке контакта.
  */
 export class Vehicle {
   readonly spec: VehicleSpec;
   readonly body: Body;
+  readonly wheels: VehicleWheel[];
+  readonly tracks: VehicleTrack[];
+  readonly deck: TruckDeck | null;
   position: Vec3;
   yaw: number;
   speed = 0;
@@ -354,6 +386,18 @@ export class Vehicle {
   private drowned = 0;
   private voxelSize: number;
   private waterLevel: number;
+  private initialHullVoxels: number;
+  private slide = v3();
+  private verticalSpeed = 0;
+  private impactDelay = 0;
+  private yawSpeed = 0;
+  private waterSurface: number | null;
+  grounded = false;
+  steeringAngle = 0;
+  wheelRotation = 0;
+  pitch = 0;
+  roll = 0;
+  private physicalPrevious = v3();
 
   constructor(kind: VehicleKind, opts: VehicleOptions) {
     this.spec = VEHICLES[kind];
@@ -361,6 +405,7 @@ export class Vehicle {
     this.yaw = opts.yaw ?? 0;
     this.voxelSize = opts.voxelSize ?? 0.1;
     this.waterLevel = opts.waterLevel ?? 0;
+    this.waterSurface = this.waterLevel;
 
     const { x, y, z } = this.spec.size;
     const shape = new VoxelShape({
@@ -372,6 +417,15 @@ export class Vehicle {
       name: `${kind}-hull`,
     });
     buildVehicleHull(shape, kind, this.spec.material);
+    this.wheels = kind === 'car' || kind === 'pickup' || kind === 'truck' ? buildVehicleWheels(kind, this.voxelSize, v3(x, y, z)) : [];
+    this.tracks = buildVehicleTracks(kind, this.voxelSize);
+    for (const wheel of this.wheels) {
+      const cx = wheel.center.x / this.voxelSize + x / 2;
+      const outer = wheel.center.z < 0 ? { z0: 0, z1: 4 } : { z0: z - 4, z1: z };
+      shape.fill({ x0: Math.floor(cx - wheel.radius / this.voxelSize - 1),
+        x1: Math.ceil(cx + wheel.radius / this.voxelSize + 1), y0: 0, y1: wheel.shape.sy + 1, ...outer }, Mat.Air);
+    }
+    this.initialHullVoxels = shape.solidVoxels;
 
     // Центрируем корпус относительно точки позиции.
     shape.transform = {
@@ -381,7 +435,7 @@ export class Vehicle {
 
     this.body = new Body({
       kind: 'dynamic',
-      shapes: [shape],
+      shapes: [shape, ...this.wheels.map(wheel => wheel.shape)],
       name: this.spec.name,
       tags: ['vehicle', kind],
       kinematic: true,
@@ -389,6 +443,8 @@ export class Vehicle {
     });
     this.body.transform.rotation = this.orientation;
     this.initialVoxels = this.body.solidVoxels;
+    this.deck = kind === 'truck' ? new TruckDeck(this.body, this.voxelSize) : null;
+    vehicleBodies.set(this.body, this);
   }
 
   get forward(): Vec3 {
@@ -401,28 +457,40 @@ export class Vehicle {
    * с камерой и контроллером игрока). Отсюда доворот на 90°.
    */
   get orientation(): Quat {
-    return quatFromEulerYXZ(this.yaw + Math.PI / 2, 0);
+    return this.body && !this.body.kinematic ? this.body.transform.rotation
+      : vehicleOrientation(this.yaw, this.pitch, this.roll);
   }
 
   /** Точка, из которой машина «смотрит» вперёд — перед бампером. */
   get nose(): Vec3 {
     const half = (this.spec.size.x / 2) * this.voxelSize;
-    return add(this.position, scale(this.forward, half));
+    return transformPoint({ position: this.position, rotation: this.orientation }, v3(half, 0, 0));
+  }
+
+  get cargoPosition(): Vec3 {
+    return this.deck ? transformPoint(this.body.transform, v3(-1.5, this.deck.min.y + 0.02, 0))
+      : add(this.position, v3(CARGO_OFFSET.x, CARGO_OFFSET.y, CARGO_OFFSET.z));
+  }
+
+  get driverEye(): Vec3 {
+    return this.deck ? transformPoint(this.body.transform, v3(3.3, 2.2, 0)) : add(this.position, v3(0, 1.4, 0));
   }
 
   spawn(sim: Simulation): Body {
     sim.world.addBody(this.body);
     sim.physics.sync(this.body);
+    this.senseWater(sim);
     return this.body;
   }
 
   get inWater(): boolean {
-    return this.position.y <= this.waterLevel + 0.05;
+    return this.waterSurface !== null && this.position.y <= this.waterSurface + 0.05 &&
+      (!this.grounded || this.position.y < this.waterSurface - 0.05);
   }
 
   /** Целость корпуса, 0..1. */
   get hullIntegrity(): number {
-    return this.initialVoxels === 0 ? 0 : this.body.solidVoxels / this.initialVoxels;
+    return this.initialHullVoxels === 0 ? 0 : this.body.shapes[0].solidVoxels / this.initialHullVoxels;
   }
 
   /** Набранная вода, 0..1. Единица — утонул. */
@@ -450,22 +518,24 @@ export class Vehicle {
   }
 
   update(sim: Simulation, input: VehicleInput, dt: number): void {
-    if (this.wrecked) return;
-
-
+    if (this.body.destroyed) { this.deck?.release(sim); return; }
+    if (dt <= 0) return;
+    dt = Math.min(dt, 0.1);
+    this.impactDelay = Math.max(0, this.impactDelay - dt);
+    if (!this.body.kinematic && this.updatePhysical(sim, dt)) return;
     // Корпус развалился больше чем наполовину — техника мертва.
-    if (this.body.solidVoxels < this.initialVoxels * 0.45) {
+    if (this.hullIntegrity < 0.45) {
       this.wrecked = true;
-      this.speed = 0;
-      return;
     }
-
+    this.senseWater(sim);
+    this.updateVertical(sim, dt);
     this.updateWater(dt);
-    if (this.wrecked) return;
+    if (!this.body.kinematic) return;
+    if (!this.wrecked && this.grounded && input.blade && this.spec.blade) this.dig(sim, dt);
 
-    if (!this.canDrive()) {
-      this.speed = approach(this.speed, 0, this.spec.brake * dt);
-    } else {
+    if (!this.canDrive() || (!this.grounded && !this.spec.aquatic)) {
+      this.speed = approach(this.speed, 0, (this.grounded || this.inWater ? this.spec.brake : 0.2) * dt);
+    } else if (this.impactDelay === 0) {
       const throttle = clamp(input.throttle, -1, 1);
       const target =
         throttle >= 0 ? throttle * this.spec.maxSpeed : throttle * this.spec.reverseSpeed;
@@ -479,32 +549,241 @@ export class Vehicle {
 
     // Руль работает только когда машина катится.
     const steerFactor = clamp(Math.abs(this.speed) / Math.max(1, this.spec.maxSpeed * 0.35), 0, 1);
-    this.yaw -= clamp(input.steer, -1, 1) * this.spec.turnRate * steerFactor * dt * Math.sign(this.speed || 1);
-
-    const delta = scale(this.forward, this.speed * dt);
-    const next = add(this.position, delta);
-
-    const blocked = this.probeBlocked(sim, next);
-    if (blocked) {
-      const punched = this.punchThrough(sim, input, dt);
-      if (!punched) {
-        this.speed *= 0.15;
-      } else {
-        this.position = next;
-      }
-    } else {
-      this.position = next;
+    this.steeringAngle = approach(this.steeringAngle, clamp(input.steer, -1, 1) * 0.5, dt * 2.5);
+    const oldYaw = this.yaw;
+    const turning = this.tracks.length ? Math.max(0.4, steerFactor) : steerFactor;
+    this.yaw -= clamp(input.steer, -1, 1) * this.spec.turnRate * turning * dt * Math.sign(this.speed || 1) *
+      Number((this.grounded || this.spec.aquatic) && this.canDrive() && !input.brake);
+    this.yaw += this.yawSpeed * dt;
+    this.yawSpeed *= Math.exp(-4 * dt);
+    if (this.contactAt(sim, this.position)) this.yaw = oldYaw;
+    const velocity = add(scale(this.forward, this.speed), this.slide);
+    const delta = scale(velocity, dt);
+    const steps = Math.max(1, Math.ceil(length(delta) / 0.15));
+    const start = { ...this.position };
+    for (let i = 0; i < steps; i++) {
+      const next = add(this.position, scale(delta, 1 / steps));
+      const collision = this.contactAt(sim, next);
+      if (collision) { this.crash(sim, collision.other, collision.normal); break; }
+      if (this.probeBlocked(sim, next)) {
+        if (!this.wrecked && this.punchThrough(sim, dt / steps)) this.position = next;
+        else {
+          const impact = Math.abs(this.speed);
+          if (impact >= 3 && this.impactDelay === 0) {
+            const outward = scale(this.forward, this.speed < 0 ? -1 : 1);
+            dentVehicle(sim, this.body, add(add(this.position, scale(outward, this.spec.size.x * this.voxelSize / 2)),
+              v3(0, this.spec.size.y * this.voxelSize * 0.35, 0)), scale(outward, -1), impact);
+            this.speed *= -0.25;
+            this.impactDelay = 0.4;
+          } else this.speed *= 0.15;
+          this.slide = v3(); break;
+        }
+      } else this.position = next;
+      if (this.grounded && !this.spec.aquatic) this.updateVertical(sim, 0);
+      if (!this.body.kinematic) break;
     }
-
-    // Катер держится на плаву, но не взлетает на воду с суши:
-    // выброшенный на берег он просто стоит. Пробитый корпус садится тем
-    // глубже, чем больше набрал воды.
-    if (this.spec.aquatic && this.position.y <= this.waterLevel) {
-      this.position.y = this.waterLevel - this.flooded * SINK_DEPTH;
+    this.slide = scale(this.slide, Math.exp(-(this.inWater ? 3 : this.grounded ? 2.5 : 0.2) * dt));
+    const travelled = dot(sub(this.position, start), this.forward);
+    for (const track of this.tracks) {
+      track.travel += travelled + (this.yaw - oldYaw) * track.center.z;
+      const shape = this.body.shapes[0];
+      const x = Math.round(track.center.x / this.voxelSize + this.spec.size.x / 2);
+      const z = Math.round(track.center.z / this.voxelSize + this.spec.size.z / 2);
+      track.visible = shape.get(x, 2, z) !== Mat.Air;
     }
-    if (input.blade && this.spec.blade) this.dig(sim, dt);
-
+    if (this.wheels.length) this.wheelRotation = (this.wheelRotation + travelled / this.wheels[0].radius) % (Math.PI * 2);
+    for (const wheel of this.wheels) wheel.pose = wheelPose(wheel, this.steeringAngle, this.wheelRotation);
+    this.senseWater(sim);
     this.syncBody();
+    sim.physics.sync(this.body);
+    this.deck?.update(sim, this.wrecked);
+  }
+
+  private footprint(position = this.position): VehicleFootprint {
+    return { position, yaw: this.yaw, length: this.spec.size.x * this.voxelSize,
+      width: this.spec.size.z * this.voxelSize, height: this.spec.size.y * this.voxelSize };
+  }
+
+  private contactAt(sim: Simulation, position: Vec3): { other: Vehicle; normal: Vec3 } | null {
+    for (const body of sim.world.bodies.values()) {
+      if (body === this.body || body.destroyed || !body.tags.has('vehicle')) continue;
+      const other = vehicleBodies.get(body);
+      if (!other) continue;
+      const contact = vehicleContact(this.footprint(position), other.footprint());
+      if (contact) return { other, normal: contact.normal };
+    }
+    return null;
+  }
+
+  private horizontalVelocity(): Vec3 { return add(scale(this.forward, this.speed), this.slide); }
+
+  private setHorizontalVelocity(velocity: Vec3): void {
+    this.speed = dot(velocity, this.forward);
+    this.slide = sub(velocity, scale(this.forward, this.speed));
+  }
+
+  private crash(sim: Simulation, other: Vehicle, normal: Vec3): void {
+    const a = this.horizontalVelocity(), b = other.horizontalVelocity();
+    const closing = dot(sub(a, b), normal);
+    if (closing <= 0) return;
+    const m1 = Math.max(1, this.body.mass() + (this.deck?.mass ?? 0));
+    const m2 = Math.max(1, other.body.mass() + (other.deck?.mass ?? 0));
+    const impulse = 1.32 * closing / (1 / m1 + 1 / m2);
+    this.setHorizontalVelocity(sub(a, scale(normal, impulse / m1)));
+    other.setHorizontalVelocity(add(b, scale(normal, impulse / m2)));
+    const point = vehicleContactPoint(this.footprint(), other.footprint(), normal);
+    const otherPoint = vehicleContactPoint(other.footprint(), this.footprint(), scale(normal, -1));
+    if (this.impactDelay === 0 && other.impactDelay === 0) {
+      dentVehicle(sim, this.body, point, scale(normal, -1), closing * m2 / (m1 + m2));
+      dentVehicle(sim, other.body, otherPoint, normal, closing * m1 / (m1 + m2));
+      const side = v3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      const offset = clamp(dot(sub(other.position, this.position), side), -1, 1);
+      this.yawSpeed += offset * closing * 0.04;
+      other.yawSpeed -= offset * closing * 0.04;
+      sim.world.events.emit('impact', { body: this.body, other: other.body, point, impulse, normal: scale(normal, -1) });
+    }
+    this.impactDelay = other.impactDelay = 0.4;
+    this.syncBody();
+    other.syncBody();
+    if (!other.body.kinematic) {
+      other.body.velocity = add(other.horizontalVelocity(), v3(0, other.verticalSpeed, 0));
+      other.body.velocityDirty = true;
+    }
+    sim.physics.sync(other.body);
+  }
+
+  private support(sim: Simulation, dt: number) {
+    const xs = this.wheels.length ? [Math.min(...this.wheels.map(w => w.center.x)), Math.max(...this.wheels.map(w => w.center.x))]
+      : [-this.spec.size.x * this.voxelSize * 0.27, this.spec.size.x * this.voxelSize * 0.27];
+    const z = this.wheels.length ? Math.abs(this.wheels[0].center.z) : this.spec.size.z * this.voxelSize * 0.36;
+    const support = vehicleSupport(sim, { position: this.position, rotation: this.orientation }, this.yaw,
+      xs.flatMap(x => [v3(x, 0, -z), v3(x, 0, z)]), -this.verticalSpeed * dt);
+    // Дублёр для тестов не вращает жёсткие тела: держим центр до края,
+    // чтобы он не опускался в асфальт, пока задний мост ещё на площадке.
+    if (!sim.physics.rigidBodyDynamics && !support.stable && support.contacts.length >= 2) {
+      const ignore = new Set([...sim.world.bodies.values()].filter(b => b.tags.has('vehicle')).map(b => b.id));
+      const hit = sim.world.raycast(add(this.position, v3(0, 0.25, 0)), v3(0, -1, 0), {
+        maxDistance: 0.5, ignore, filter: (mat, _shape, body) => !body.passive && mat !== Mat.Water && mat !== Mat.Paint,
+      });
+      if (hit && hit.normal.y > 0.5) return { ...support, height: hit.point.y, pitch: 0, roll: 0, stable: true };
+    }
+    return support;
+  }
+
+  /** Считывать результат солвера, не сбрасывая физический наклон корпуса. */
+  afterPhysics(): void {
+    if (this.body.kinematic) return;
+    this.position = { ...this.body.transform.position };
+    const heading = rotateVec(this.body.transform.rotation, v3(1, 0, 0));
+    if (Math.hypot(heading.x, heading.z) > 0.01) this.yaw = Math.atan2(-heading.x, -heading.z);
+    this.pitch = Math.atan2(heading.y, Math.hypot(heading.x, heading.z));
+    const up = rotateVecInverse(quatFromEulerYXZ(this.yaw + Math.PI / 2, 0),
+      rotateVec(this.body.transform.rotation, v3(0, 1, 0)));
+    this.roll = Math.atan2(up.z, up.y);
+    this.setHorizontalVelocity(v3(this.body.velocity.x, 0, this.body.velocity.z));
+    this.verticalSpeed = this.body.velocity.y;
+  }
+
+  private updatePhysical(sim: Simulation, dt: number): boolean {
+    this.afterPhysics(); this.senseWater(sim); this.updateWater(dt);
+    const support = this.support(sim, dt);
+    if (support.stable && Math.abs(this.pitch - support.pitch) < 0.15 && Math.abs(this.roll - support.roll) < 0.15 &&
+        Math.abs(this.verticalSpeed) < 1.5 && length(this.body.angularVelocity) < 0.8) {
+      this.body.kinematic = true; this.position.y = support.height + 0.02;
+      this.pitch = support.pitch; this.roll = support.roll;
+      this.grounded = true; this.verticalSpeed = 0;
+      this.syncBody(); sim.physics.sync(this.body);
+      return false;
+    }
+    if (this.hullIntegrity < 0.45) this.wrecked = true;
+    this.grounded = false;
+    const travelled = dot(sub(this.position, this.physicalPrevious), this.forward);
+    if (this.wheels.length) this.wheelRotation = (this.wheelRotation + travelled / this.wheels[0].radius) % (2 * Math.PI);
+    for (const wheel of this.wheels) wheel.pose = wheelPose(wheel, this.steeringAngle, this.wheelRotation);
+    this.physicalPrevious = { ...this.position };
+    this.deck?.update(sim, this.wrecked);
+    return true;
+  }
+
+  private senseWater(sim: Simulation): void {
+    const finiteWater = [...sim.world.bodies.values()].some(body => !body.destroyed && body.tags.has('water'));
+    if (!finiteWater) { this.waterSurface = this.waterLevel; return; }
+    const origin = v3(this.position.x, Math.max(this.position.y + 0.2, this.waterLevel + 0.2), this.position.z);
+    const hit = sim.world.raycast(origin, v3(0, -1, 0), { maxDistance: origin.y - this.waterLevel + 0.2,
+      filter: mat => mat === Mat.Water });
+    this.waterSurface = hit ? hit.point.y : null;
+  }
+
+  private updateVertical(sim: Simulation, dt: number): void {
+    if (!this.spec.aquatic) {
+      const support = this.support(sim, dt);
+      this.verticalSpeed = Math.max(-45, this.verticalSpeed + sim.world.gravity.y * dt);
+      const next = this.position.y + this.verticalSpeed * dt;
+      const resting = support.height + 0.02;
+      if (support.stable && (next <= resting || this.position.y - resting <= 0.12)) {
+        this.position.y = resting;
+        this.pitch = support.pitch; this.roll = support.roll;
+        this.verticalSpeed = 0; this.grounded = true;
+      } else {
+        this.grounded = false;
+        if (sim.physics.rigidBodyDynamics) {
+          this.syncBody(); this.physicalPrevious = { ...this.position };
+          this.body.kinematic = false; this.body.velocityDirty = true;
+          // Передний мост потерял опору: небольшой момент запускает
+          // опрокидывание, затем вращение и контакты считает Rapier.
+          if (support.contacts.length && support.contacts.length < 3) {
+            const meanX = support.contacts.reduce((n, p) => n + p.x, 0) / support.contacts.length;
+            const meanZ = support.contacts.reduce((n, p) => n + p.z, 0) / support.contacts.length;
+            this.body.angularVelocity = rotateVec(quatFromEulerYXZ(this.yaw + Math.PI / 2, 0),
+              v3(-meanZ * 0.6, 0, meanX * 0.6));
+          }
+          sim.physics.sync(this.body);
+        } else this.position.y = next;
+      }
+      return;
+    }
+    const ignore = new Set<number>();
+    for (const body of sim.world.bodies.values()) if (body.tags.has('vehicle')) ignore.add(body.id);
+    const halfX = this.spec.size.x * this.voxelSize * 0.32;
+    const halfZ = this.spec.size.z * this.voxelSize * 0.32;
+    const samples = [v3(), v3(-halfX, 0, -halfZ), v3(-halfX, 0, halfZ), v3(halfX, 0, -halfZ), v3(halfX, 0, halfZ)];
+    const heights: number[] = [];
+    let centerGround: number | null = null;
+    for (const [i, local] of samples.entries()) {
+      const p = transformPoint({ position: this.position, rotation: this.orientation }, local);
+      p.y += 0.3;
+      const hit = sim.world.raycast(p, v3(0, -1, 0), {
+        maxDistance: 0.6 + Math.max(0, -this.verticalSpeed * dt), ignore,
+        filter: (mat, _shape, body) => !body.passive && mat !== Mat.Water && mat !== Mat.Paint,
+      });
+      // Луч, начавшийся внутри стены или колонны, не является верхней гранью опоры.
+      if (!hit || hit.normal.y < 0.5) continue;
+      heights.push(hit.point.y);
+      if (i === 0) centerGround = hit.point.y;
+    }
+    heights.sort((a, b) => a - b);
+    // Отдельный высокий угол не поднимает весь кузов как лифт.
+    const ground = heights.length >= 3 ? heights[Math.floor(heights.length / 2)] : centerGround ?? -Infinity;
+    const afloat = this.spec.aquatic && this.waterSurface !== null && this.position.y <= this.waterSurface + 0.1 &&
+      ground < this.waterSurface - 0.05 && this.flooded < 1;
+    if (afloat) {
+      this.position.y = this.waterSurface! - this.flooded * SINK_DEPTH;
+      this.verticalSpeed = 0;
+      this.grounded = false;
+      return;
+    }
+    this.verticalSpeed = Math.max(-45, this.verticalSpeed + sim.world.gravity.y * dt);
+    const next = this.position.y + this.verticalSpeed * dt;
+    const resting = ground + 0.02;
+    // Подвеска выбирает небольшой стартовый зазор над покрытием; на краю без луча опоры машина падает.
+    if (next <= resting || (this.verticalSpeed <= 0 && this.position.y - resting <= 0.12)) {
+      this.position.y = resting;
+      this.verticalSpeed = 0;
+      this.grounded = true;
+    } else {
+      this.position.y = next;
+      this.grounded = false;
+    }
   }
 
   /**
@@ -526,7 +805,7 @@ export class Vehicle {
       return;
     }
 
-    if (!this.spec.amphibious && this.position.y < this.waterLevel - DROWN_DEPTH) {
+    if (!this.spec.amphibious && this.waterSurface !== null && this.position.y < this.waterSurface - DROWN_DEPTH) {
       this.drowned += dt;
       this.speed = approach(this.speed, 0, this.spec.brake * 2 * dt);
       if (this.drowned > DROWN_SECONDS) {
@@ -539,8 +818,11 @@ export class Vehicle {
   }
 
   private syncBody(): void {
+    if (!this.body.kinematic) return;
     this.body.transform.position = { ...this.position };
     this.body.transform.rotation = this.orientation;
+    this.body.velocity = add(this.horizontalVelocity(), v3(0, this.verticalSpeed, 0));
+    this.body.angularVelocity = v3(0, this.yawSpeed, 0);
     this.body.wake();
   }
 
@@ -553,100 +835,92 @@ export class Vehicle {
     // Проверяем препятствие со стороны фактического движения.
     // При заднем ходе щуп должен быть у заднего бампера, иначе стена
     // перед носом не даёт машине отъехать от неё.
-    const motionDir = this.speed < 0 ? scale(this.forward, -1) : this.forward;
-    const probe = add(next, scale(motionDir, half + PROBE_MARGIN));
     const r = PROBE_HALF;
-    const box = {
-      min: v3(probe.x - r, probe.y + 0.15, probe.z - r),
-      max: v3(probe.x + r, probe.y + this.spec.size.y * this.voxelSize, probe.z + r),
-    };
-    return scanIgnoring(sim, box, new Set([this.body.id]));
+    const ignore = new Set([this.body.id]);
+    for (const body of sim.world.bodies.values()) {
+      if (body.tags.has('vehicle')) ignore.add(body.id);
+    }
+    // Широкий отвал замечает также край контейнера или колонну сбоку от центра.
+    const width = this.spec.size.z * this.voxelSize;
+    const samples = Math.max(1, Math.ceil(width / (2 * r)));
+    for (let i = 0; i < samples; i++) {
+      const offset = samples === 1 ? 0 : -width / 2 + r + i * (width - 2 * r) / (samples - 1);
+      const p = transformPoint({ position: next, rotation: this.orientation },
+        v3((this.speed < 0 ? -1 : 1) * (half + PROBE_MARGIN), 0, offset));
+      const surface = sim.world.raycast(add(p, v3(0, 0.5, 0)), v3(0, -1, 0), {
+        maxDistance: 0.8, ignore, filter: (mat, _shape, body) => !body.passive && mat !== Mat.Water && mat !== Mat.Paint,
+      });
+      // Низкая наклонная доска под бампером — дорога к колёсам,
+      // а не вертикальная стена, которую следует пробивать.
+      const bottom = Math.max(p.y + 0.3, surface && surface.normal.y > 0.5 ? surface.point.y + 0.08 : -Infinity);
+      if (scanIgnoring(sim, {
+        min: v3(p.x - r, bottom, p.z - r),
+        max: v3(p.x + r, p.y + this.spec.size.y * this.voxelSize, p.z + r),
+      }, ignore)) return true;
+    }
+    return false;
   }
 
   /**
    * Таран: на скорости корпус прорезает воксели впереди. Чем быстрее,
    * тем больше дыра — именно так «пробить стену на скорости» и работает.
    */
-  private punchThrough(sim: Simulation, input: VehicleInput, dt: number): boolean {
+  private punchThrough(sim: Simulation, dt: number): boolean {
     const speed = Math.abs(this.speed);
-    const useBlade = input.blade && this.spec.blade && this.speed >= 0;
-    if (!useBlade && speed < this.spec.ramSpeed) return false;
-
-    const blade = this.spec.blade;
-    // Потолок 0.55 — ниже прочности стали: корпусом сталь не берут
-    // ни на какой скорости, для неё есть лампа и заряд.
-    const power = useBlade ? blade!.power : clamp(0.15 + speed * 0.02, 0, 0.55);
-    const halfW = useBlade ? blade!.halfWidth : (this.spec.size.z / 2) * this.voxelSize;
-    const halfH = useBlade ? blade!.halfHeight : (this.spec.size.y / 2) * this.voxelSize;
-    const reach = useBlade ? blade!.reach : clamp(speed * 0.06, 0.15, 0.9);
-
+    // Кузов не заменяет ковш. Легковой удар берёт лишь слабые ограды;
+    // кирпич, бетон, сталь и сама дорога не прорезаются на скорости.
+    if (this.spec.blade || speed < this.spec.ramSpeed) return false;
     const direction = scale(this.forward, this.speed < 0 ? -1 : 1);
-    const bumper = add(this.position, scale(direction, this.spec.size.x * this.voxelSize / 2));
-    const center = add(bumper, scale(direction, reach * 0.5));
-    const impact = v3(center.x, center.y + halfH, center.z);
+    const halfH = this.spec.size.y * this.voxelSize / 2;
+    const halfW = this.spec.size.z * this.voxelSize / 2;
+    const bumper = transformPoint({ position: this.position, rotation: this.orientation },
+      v3((this.speed < 0 ? -1 : 1) * this.spec.size.x * this.voxelSize / 2, halfH, 0));
     const side = v3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    // Скруглённый скол должен очищать не только центр, но и весь щуп:
-    // иначе верхние углы проёма снова останавливают машину.
     const radius = Math.hypot(halfH, PROBE_HALF) + this.voxelSize * 0.5;
     const span = Math.max(0, halfW - radius);
-    const ignore = new Set([this.body.id]);
-    for (const body of sim.world.bodies.values()) {
-      if (body.tags.has('carved-debris')) ignore.add(body.id);
-    }
-    const res = carve(
-      sim.world,
-      useBlade ? {
-        kind: 'box', center: impact,
-        halfExtents: v3(reach, halfH, halfW), rotation: this.orientation,
-      } : {
-        kind: 'capsule',
-        a: add(impact, scale(side, -span)),
-        b: add(impact, scale(side, span)),
-        radius,
-      },
-      {
-        power,
-        damage: 0,
-        instant: true,
-        falloff: 'none',
-        cause: useBlade ? 'blade' : 'ram',
-        ignoreBodies: ignore,
-        physicalDebris: useBlade ? undefined : {
-          velocity: add(scale(direction, speed * 0.3), v3(0, 1.5, 0)),
-        },
-      },
-    );
-
+    const res = carve(sim.world, {
+      kind: 'capsule', a: add(bumper, scale(side, -span)), b: add(bumper, scale(side, span)), radius,
+    }, {
+      power: 0.25, damage: 0, instant: true, falloff: 'none', cause: 'ram',
+      maxVoxels: 1200, ignoreBodies: this.toolIgnore(sim), filterVoxel: this.toolFilter(this.speed < 0 ? -1 : 1),
+      physicalDebris: { velocity: add(scale(direction, speed * 0.15), v3(0, 0.7, 0)), maxFragments: 8 },
+    });
     if (res.removed === 0) return false;
-    // Удар о стену гасит скорость, но не останавливает намертво.
     const next = add(this.position, scale(this.forward, this.speed * dt));
-    this.speed *= useBlade ? 0.85 : 0.7;
-    // Снятая древесина рядом со сталью ещё не означает свободный проход.
+    this.speed *= 0.35;
     return !this.probeBlocked(sim, next);
   }
 
-  /** Ковш: расчистка завала на месте. */
+  private toolIgnore(sim: Simulation): Set<number> {
+    return new Set([...sim.world.bodies.values()].filter(b =>
+      b.tags.has('vehicle') || b.tags.has('carved-debris') || b.tags.has('truck-load')).map(b => b.id));
+  }
+
+  private toolFilter(direction = 1) {
+    const pose = { position: { ...this.position }, rotation: this.orientation };
+    const bumper = this.spec.size.x * this.voxelSize / 2;
+    return (shape: VoxelShape, body: Body, x: number, y: number, z: number): boolean => {
+      const local = inverseTransformPoint(pose, shape.voxelCenterWorld(x, y, z, body.transform));
+      // Ни под шасси, ни ниже плоскости опоры инструмент не действует.
+      return local.y > 0.15 && local.x * direction > bumper + 0.01;
+    };
+  }
+
+  /** Рабочий ковш только перед отвалом и только по команде игрока. */
   private dig(sim: Simulation, dt: number): void {
     const blade = this.spec.blade;
-    if (!blade) return;
-    const center = add(this.nose, scale(this.forward, blade.reach * 0.5));
-    carve(
-      sim.world,
-      {
-        kind: 'box',
-        center: v3(center.x, center.y + blade.halfHeight * 0.6, center.z),
-        halfExtents: v3(blade.reach, blade.halfHeight, blade.halfWidth),
-        rotation: this.orientation,
-      },
-      {
-        power: blade.power,
-        damage: 200 * dt * 60,
-        falloff: 'none',
-        cause: 'bucket',
-        ignoreBodies: new Set([this.body.id]),
-      },
-    );
+    if (!blade || dt <= 0) return;
+    const pose = { position: this.position, rotation: this.orientation };
+    const center = transformPoint(pose, v3(this.spec.size.x * this.voxelSize / 2 + blade.reach / 2,
+      0.15 + blade.halfHeight, 0));
+    carve(sim.world, { kind: 'box', center,
+      halfExtents: v3(blade.reach / 2, blade.halfHeight, blade.halfWidth), rotation: this.orientation }, {
+      power: blade.power, damage: 0, instant: true, falloff: 'none', cause: 'bucket',
+      maxVoxels: Math.max(1, Math.floor(18_000 * dt)), ignoreBodies: this.toolIgnore(sim), filterVoxel: this.toolFilter(),
+      physicalDebris: { velocity: add(scale(this.forward, Math.max(0, this.speed) * 0.1), v3(0, 0.6, 0)), maxFragments: 4 },
+    });
   }
+
 }
 
 /** Ниже этой целости корпуса катер начинает набирать воду. */
