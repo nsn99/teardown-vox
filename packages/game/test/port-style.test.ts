@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { Mat, Simulation, v3 } from '@tvox/core';
-import { PORT_DOC, parseLevelDoc, portLevel } from '@tvox/game';
+import { AutomaticGate, PORT_DOC, parseLevelDoc, portLevel } from '@tvox/game';
+import { overlapsSolid } from '../src/character.js';
 
 it('кирпичный порт имеет полые скатные крыши и остаётся устойчивым при загрузке', () => {
   expect(parseLevelDoc(PORT_DOC).environment!.daylight).toBe('golden');
@@ -19,5 +20,22 @@ it('кирпичный порт имеет полые скатные крыши 
     expect(inside!.point.y).toBeGreaterThan(7);
     const stable = sim.settle();
     expect(stable.stressFailures).toBe(0); expect(stable.detachedVoxels).toBe(0);
+  } finally { sim.dispose(); }
+});
+
+it('торцевые ворота открывают проход в склад и падают при разрушении крепления', () => {
+  const sim = new Simulation();
+  try {
+    portLevel.build(sim);
+    const gate = new AutomaticGate(sim, portLevel.gates!.find(g => g.id === 'warehouse-gable-entry')!);
+    const visitor = { min: v3(27, 0.05, 21), max: v3(28, 2, 23) };
+    expect(sim.world.raycast(v3(28, 1, 22), v3(-1, 0, 0), { maxDistance: 2 })?.body).toBe(gate.body);
+    for (let i = 0; i < 90; i++) gate.update(visitor, 1 / 60);
+    expect(gate.opening).toBe(1);
+    expect(overlapsSolid(sim.world, { min: v3(24.8, 0.05, 20.1), max: v3(28.5, 3.9, 23.9) })).toBe(false);
+    const warehouse = [...sim.world.bodies.values()].flatMap(b => b.shapes).find(s => s.name === 'warehouse')!;
+    warehouse.set(198, 44, 80, Mat.Air);
+    gate.update(visitor, 1 / 60);
+    expect(gate.body.kinematic).toBe(false);
   } finally { sim.dispose(); }
 });
