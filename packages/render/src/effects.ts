@@ -168,6 +168,13 @@ export class ParticleSystem {
     }
   }
 
+  /** Капли оплавленного пластика падают вниз, пользуясь общим ограниченным пулом. */
+  emitMelt(at: Vec3): void {
+    for (let i = 0; i < 3; i++) this.spawn({ kind: 'debris',
+      x: at.x, y: at.y, z: at.z, vx: this.rand(-0.12, 0.12), vy: -0.3, vz: this.rand(-0.12, 0.12),
+      maxLife: 0.8, size: 0.035, r: 0.32, g: 0.22, b: 0.13 });
+  }
+
   emitFire(at: Vec3, heat = 1): void {
     this.spawn({
       kind: 'fire',
@@ -374,5 +381,73 @@ export class ExtinguisherJet {
     this.bubbles.length = 0;
     this.mesh.count = 0;
     this.mesh.visible = false;
+  }
+}
+
+
+/** Непрерывная струя с фиксированным числом частиц и затуханием после отпускания. */
+export class FlameJet {
+  readonly group = new THREE.Group();
+  readonly mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false }), 192);
+  readonly light = new THREE.PointLight(0xff8a36, 0, 5);
+  private puffs: Array<{ from: THREE.Vector3; to: THREE.Vector3; age: number;
+    life: number; phase: number; spread: number; hit: boolean; side: THREE.Vector3; up: THREE.Vector3 }> = [];
+  private pose = new THREE.Object3D();
+  private color = new THREE.Color();
+  private serial = 0;
+  private emitting = 0;
+
+  constructor() {
+    this.group.name = 'flamethrower-jet';
+    this.group.add(this.mesh, this.light);
+    this.mesh.count = 0; this.mesh.frustumCulled = false;
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  }
+
+  get active(): boolean { return this.emitting > 0; }
+
+  show(origin: Vec3, target: Vec3, hit = false): void {
+    const from = new THREE.Vector3(origin.x, origin.y - 0.15, origin.z);
+    const to = new THREE.Vector3(target.x, target.y, target.z);
+    const direction = to.clone().sub(from), distance = direction.length();
+    if (distance < 0.01) return;
+    from.addScaledVector(direction.normalize(), Math.min(0.25, distance * 0.2));
+    const side = new THREE.Vector3().crossVectors(direction,
+      Math.abs(direction.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(side, direction);
+    this.light.position.copy(from); this.emitting = 0.09;
+    for (let i = 0; i < 14; i++) {
+      if (this.puffs.length === 192) this.puffs.shift();
+      this.puffs.push({ from, to, side, up, age: -i * 0.003, life: Math.max(0.04, distance / 18),
+        phase: this.serial++ * 2.399963, spread: 0.1 + distance * 0.045, hit });
+    }
+  }
+
+  step(dt: number): void {
+    this.emitting = Math.max(0, this.emitting - dt);
+    this.light.intensity = this.active ? 5 : 0;
+    this.puffs = this.puffs.filter(p => { p.age += dt; return p.age < p.life + (p.hit ? 0.12 : 0); });
+    let count = 0;
+    for (const p of this.puffs) {
+      if (p.age < 0) continue;
+      const t = Math.min(1, p.age / p.life), tail = Math.max(0, p.age - p.life) / 0.12;
+      this.pose.position.copy(p.from).lerp(p.to, t)
+        .addScaledVector(p.side, Math.cos(p.phase) * p.spread * t)
+        .addScaledVector(p.up, Math.sin(p.phase) * p.spread * t);
+      this.pose.scale.setScalar((0.045 + t * p.spread * 0.85) * (1 - tail));
+      this.pose.updateMatrix(); this.mesh.setMatrixAt(count, this.pose.matrix);
+      this.color.setRGB(1, Math.max(0.12, 0.85 - t * 0.65), Math.max(0.02, 0.3 - t * 0.35));
+      this.mesh.setColorAt(count++, this.color);
+    }
+    this.mesh.count = count; this.mesh.visible = count > 0;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  clear(): void {
+    this.puffs.length = 0; this.emitting = 0; this.light.intensity = 0;
+    this.mesh.count = 0; this.mesh.visible = false;
   }
 }

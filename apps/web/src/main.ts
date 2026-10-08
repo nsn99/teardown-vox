@@ -32,7 +32,7 @@ import {
   stepStructure,
   v3,
 } from '@tvox/core';
-import { ChargeView, ExtinguisherJet, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { ChargeView, ExtinguisherJet, FlameJet, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -47,9 +47,10 @@ const renderer = new VoxelRenderer({ canvas, quality: mobile ? 'low' : 'medium' 
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
 const extinguisherJet = new ExtinguisherJet();
+const flameJet = new FlameJet();
 let extinguisherHitUntil = 0;
 const chargeView = new ChargeView();
-renderer.scene.add(particles.points, fireLights.group, chargeView.group, extinguisherJet.mesh);
+renderer.scene.add(particles.points, fireLights.group, chargeView.group, extinguisherJet.mesh, flameJet.group);
 const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
@@ -177,6 +178,7 @@ function startRun(inSandbox: boolean, saved?: SessionSave): void {
   heist?.sim.dispose();
   particles.clear();
   extinguisherJet.clear();
+  flameJet.clear();
   extinguisherHitUntil = 0;
   chargeView.update([]);
 
@@ -239,6 +241,7 @@ function toHub(): void {
   void persistSession();
   paused = true;
   extinguisherJet.clear();
+  flameJet.clear();
   player.suspend();
   hud.hide();
   input.releaseLock();
@@ -319,7 +322,7 @@ function wireEvents(h: Heist): void {
 const vehicleInput: VehicleInput = { ...NEUTRAL_INPUT };
 
 function handleActions(h: Heist): void {
-  for (let slot = 1; slot <= 7; slot++) {
+  for (let slot = 1; slot <= 8; slot++) {
     if (input.take(`Digit${slot}`)) {
       const id = toolBySlot(slot);
       if (id) h.inventory.select(id);
@@ -431,6 +434,7 @@ function handleActions(h: Heist): void {
   if (use && !h.operating) {
     const res = h.use();
     if (res.used) {
+      if (res.tool === 'flamethrower' && res.point) flameJet.show(h.eye, res.point, res.sprayHitSurface);
       if (res.tool === 'extinguisher' && res.point) {
         extinguisherJet.show(h.eye, res.point, res.sprayHitSurface);
         if ((res.doused ?? 0) > 0) extinguisherHitUntil = performance.now() + 800;
@@ -443,7 +447,8 @@ function handleActions(h: Heist): void {
           1.2,
         );
       }
-      if (res.point && (res.removed ?? 0) > 0) {
+      for (const point of res.meltPoints ?? []) particles.emitMelt(point);
+      if (res.point && (res.removed ?? 0) > 0 && !res.meltPoints?.length) {
         particles.emitSparks(res.point, h.inventory.active === 'blowtorch' ? 10 : 4);
       }
       if (res.reason === undefined && h.inventory.active === 'planks' && res.spawned) {
@@ -529,6 +534,8 @@ function frame(now: number): void {
 
   particles.step(dt);
   extinguisherJet.step(dt);
+  flameJet.step(dt);
+  if (h.inventory.active !== 'flamethrower') flameJet.clear();
   if (h.inventory.active !== 'extinguisher') extinguisherJet.clear();
   const firePointLimit = { low: 48, medium: 128, high: 256 }[renderer.currentQuality];
   const firePoints = [...h.sim.fire.burningPoints(firePointLimit)];
@@ -547,6 +554,7 @@ function frame(now: number): void {
       // Винт слышно раньше, чем видно: это единственное предупреждение,
       // которое приходит вовремя.
       pursuit: h.pursuit.proximity(h.eye),
+      flamethrower: flameJet.active,
     }),
   );
 

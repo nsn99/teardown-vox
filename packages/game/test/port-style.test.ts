@@ -18,6 +18,11 @@ it('кирпичный порт имеет полые скатные крыши 
     const inside = sim.world.raycast(v3(12, 3, 22), v3(0, 1, 0), { maxDistance: 20 });
     expect(inside!.shape).toBe(warehouse);
     expect(inside!.point.y).toBeGreaterThan(7);
+    // build() уже пометил формы как проверенные. Один settle() после
+    // прогрева не пересчитывает нагрузку и может скрыть перегрузку рамы.
+    const primed = sim.primeStructure();
+    expect(primed.failures).toBe(0);
+    expect(primed.loose).toBe(0);
     const stable = sim.settle();
     expect(stable.stressFailures).toBe(0); expect(stable.detachedVoxels).toBe(0);
   } finally { sim.dispose(); }

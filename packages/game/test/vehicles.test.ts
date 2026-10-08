@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Body, Mat, Simulation, VoxelShape, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, VEHICLES, Vehicle, VehicleInput } from '@tvox/game';
 import { roadSim } from './helpers/vehicle-world.js';
+import { overlapsSolid } from '../src/character.js';
 
 const VS = 0.1;
 const drive = (over: Partial<VehicleInput> = {}): VehicleInput => ({
@@ -318,6 +319,25 @@ describe('вода', () => {
 });
 
 describe('силуэт техники', () => {
+  it('камера катера находится в пустой рубке и смотрит через стекло при повороте', () => {
+    const sim = new Simulation();
+    try {
+      const boat = new Vehicle('boat', { position: v3(3, -0.4, -7), yaw: Math.PI / 3 });
+      boat.spawn(sim);
+      const eye = boat.driverEye;
+      expect(overlapsSolid(sim.world, {
+        min: v3(eye.x - 0.06, eye.y - 0.06, eye.z - 0.06),
+        max: v3(eye.x + 0.06, eye.y + 0.06, eye.z + 0.06),
+      })).toBe(false);
+      const ahead = sim.world.raycast(eye, boat.forward, { maxDistance: 2 })!;
+      expect(ahead.body).toBe(boat.body);
+      expect(ahead.shape.get(ahead.vx, ahead.vy, ahead.vz)).toBe(Mat.Glass);
+      expect(ahead.distance).toBeGreaterThan(0.4);
+      const roof = sim.world.raycast(eye, v3(0, 1, 0), { maxDistance: 1 })!;
+      expect(roof.shape.get(roof.vx, roof.vy, roof.vz)).toBe(Mat.Metal);
+    } finally { sim.dispose(); }
+  });
+
   it('у бульдозера раздельные гусеницы, высокая кабина и наклонный отвал', () => {
     const v = new Vehicle('bulldozer', { position: v3(0, 0.1, 0) });
     const shape = v.body.shapes[0];

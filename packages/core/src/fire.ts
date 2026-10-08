@@ -44,11 +44,31 @@ export interface BurningCell {
   fuel: number;
 }
 
+export interface HeatedCell {
+  temperature: number;
+  material: number;
+  originalPaint?: number;
+  tint?: number;
+  glassDamage: number;
+}
+
+/** Игровая модель теплообмена, не расчёт температуры реального изделия. */
+function thermalTime(mat: number): number {
+  if (mat === Mat.Plastic || mat === Mat.Foliage) return 0.8;
+  if (mat === Mat.Wood || mat === Mat.Plank || mat === Mat.Charred) return 1.5;
+  if (mat === Mat.Glass) return 3;
+  if (mat === Mat.RoofMetal) return 5;
+  if (mat === Mat.Metal || mat === Mat.Cable) return 10;
+  if (mat === Mat.HeavyMetal) return 16;
+  return 24;
+}
+
 interface ShapeFire {
   body: Body;
   shape: VoxelShape;
   cells: Map<number, BurningCell>;
   wet: Map<number, number>;
+  heated: Map<number, HeatedCell>;
 }
 
 export interface FireStepResult {
@@ -77,6 +97,8 @@ export class FireSystem {
   private rng: () => number;
   private shapes = new Map<number, ShapeFire>();
   private burningTotal = 0;
+  private heatedTotal = 0;
+  private readonly maxHeated = 4096;
 
   constructor(opts: FireOptions = {}) {
     this.cfg = { ...DEFAULTS, ...opts };
@@ -84,12 +106,15 @@ export class FireSystem {
   }
 
   snapshot() { return [...this.shapes.values()].map(s => ({ bodyId: s.body.id, shapeId: s.shape.id,
-    cells: structuredClone([...s.cells]), wet: [...s.wet] })); }
+    cells: structuredClone([...s.cells]), wet: [...s.wet], heated: structuredClone([...s.heated]) })); }
   restore(saved: ReturnType<FireSystem['snapshot']>, bodies: Map<number, Body>, shapes: Map<number, VoxelShape>): void {
     this.reset();
     for (const s of saved) { const body = bodies.get(s.bodyId), shape = shapes.get(s.shapeId);
       if (!body || !shape) continue;
-      this.shapes.set(shape.id, { body, shape, cells: new Map(s.cells), wet: new Map(s.wet) });
+      this.shapes.set(shape.id, { body, shape, cells: new Map(s.cells), wet: new Map(s.wet), heated: new Map(structuredClone(s.heated ?? [])) });
+      this.heatedTotal += s.heated?.length ?? 0;
+      const sf = this.shapes.get(shape.id)!;
+      for (const [index, cell] of sf.heated) { cell.tint = undefined; this.tintHeat(sf, index, cell); }
       this.burningTotal += s.cells.length;
     }
   }
@@ -126,7 +151,7 @@ export class FireSystem {
   private slot(body: Body, shape: VoxelShape): ShapeFire {
     let sf = this.shapes.get(shape.id);
     if (!sf) {
-      sf = { body, shape, cells: new Map(), wet: new Map() };
+      sf = { body, shape, cells: new Map(), wet: new Map(), heated: new Map() };
       this.shapes.set(shape.id, sf);
     } else {
       sf.body = body;
@@ -150,6 +175,97 @@ export class FireSystem {
     sf.cells.set(index, { index, heat, fuel: def.fuel });
     this.burningTotal++;
     return true;
+  }
+
+  /** Струя греет только реально попавшую под луч поверхность. */
+  heatSurface(world: VoxelWorld, body: Body, shape: VoxelShape, index: number,
+    seconds: number, power = 1): { ignited: number; removed: number; heated: number } {
+    const result = { ignited: 0, removed: 0, heated: 0 };
+    const mat = shape.data[index], def = material(mat);
+    if (seconds <= 0 || power <= 0 || body.destroyed || body.passive || mat === Mat.Air ||
+      mat === Mat.Water || mat === Mat.Loot || def.indestructible || this.isSubmerged(body, shape, index)) return result;
+    const sf = this.slot(body, shape);
+    // Пена сначала должна высохнуть; струя не отменяет защиту за один кадр.
+    if ((sf.wet.get(index) ?? 0) > 0) return result;
+    let cell = sf.heated.get(index);
+    if (cell && cell.material !== mat) { this.forgetHeat(sf, index, false); cell = undefined; }
+    if (!cell) {
+      if (this.heatedTotal >= this.maxHeated) {
+        // Освобождаем старую тепловую запись, чтобы длинная струя могла
+        // перейти на новые предметы даже после нагрева большого участка.
+        for (const old of this.shapes.values()) {
+          const first = old.heated.keys().next();
+          if (!first.done) { this.forgetHeat(old, first.value, true); break; }
+        }
+      }
+      cell = { temperature: 20, material: mat, originalPaint: shape.paint.get(index), glassDamage: 0 };
+      sf.heated.set(index, cell); this.heatedTotal++;
+    }
+    const dt = Math.min(0.25, seconds);
+    cell.temperature += (1100 - cell.temperature) * (1 - Math.exp(-power * dt / thermalTime(mat)));
+    result.heated = 1;
+    const c = shape.coords(index);
+    if (def.flammability > 0 && cell.temperature >= (mat === Mat.Foliage ? 150 : 280) &&
+      this.ignite(body, shape, index)) {
+      result.ignited = 1;
+      world.events.emit('fire:ignited', { body, shape, index,
+        point: shape.voxelCenterWorld(c.x, c.y, c.z, body.transform) });
+    }
+    // Пластик размягчается раньше воспламенения, стекло разрушается постепенно.
+    let remove = mat === Mat.Plastic && cell.temperature >= 230;
+    if (mat === Mat.Glass) {
+      cell.glassDamage = Math.max(cell.glassDamage, shape.damage[index]);
+      cell.glassDamage += dt * Math.max(0, cell.temperature - 250) * 0.15;
+      shape.damage[index] = Math.min(120, Math.floor(cell.glassDamage));
+      remove = cell.glassDamage >= 120;
+      shape.markMeshDirty(c.x, c.y, c.z);
+    } else if (cell.temperature > 650 && def.flammability === 0) {
+      // Стальная деталь от этой струи не плавится и не исчезает: накопленный
+      // термоурон лишь облегчает последующее механическое разрушение.
+      const metal = mat === Mat.Metal || mat === Mat.HeavyMetal || mat === Mat.RoofMetal || mat === Mat.Cable;
+      const fatigue = (cell.temperature - 650) / 450 * def.hp * (metal ? 0.55 : 0.2);
+      shape.damage[index] = Math.max(shape.damage[index], Math.floor(fatigue));
+    }
+    if (remove) {
+      this.forgetHeat(sf, index, false);
+      if (sf.cells.delete(index)) this.burningTotal--;
+      shape.setAt(index, Mat.Air);
+      body.collidersDirty = true;
+      result.removed = 1;
+      world.events.emit('fire:burnedOut', { body, shape, index });
+    } else this.tintHeat(sf, index, cell);
+    return result;
+  }
+
+  temperature(shape: VoxelShape, index: number): number {
+    return this.shapes.get(shape.id)?.heated.get(index)?.temperature ?? 20;
+  }
+
+  private tintHeat(sf: ShapeFire, index: number, cell: HeatedCell): void {
+    if (cell.material === Mat.Glass) return; // стекло темнеет через damage в мешере
+    const mat = material(cell.material);
+    const raw = cell.originalPaint;
+    const base = raw !== undefined && raw >= 0x1000000
+      ? [(raw >> 16) & 255, (raw >> 8) & 255, raw & 255] : mat.color;
+    const amount = Math.floor(Math.min(1, Math.max(0, (cell.temperature - 200) / 800)) * 8) / 8;
+    const hot = cell.temperature > 650 && mat.flammability === 0 ? [210, 65, 20] : [50, 43, 37];
+    const rgb = base.map((c, i) => Math.round(c * (1 - amount) + hot[i] * amount));
+    const tint = amount === 0 ? cell.originalPaint : 0x1000000 | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+    if (tint === cell.tint) return;
+    if (tint === undefined) sf.shape.paint.delete(index); else sf.shape.paint.set(index, tint);
+    cell.tint = tint;
+    const c = sf.shape.coords(index); sf.shape.markMeshDirty(c.x, c.y, c.z);
+  }
+
+  private forgetHeat(sf: ShapeFire, index: number, restore: boolean): void {
+    const cell = sf.heated.get(index);
+    if (!cell) return;
+    if (restore && sf.shape.data[index] === cell.material && sf.shape.paint.get(index) === cell.tint) {
+      if (cell.originalPaint === undefined) sf.shape.paint.delete(index);
+      else sf.shape.paint.set(index, cell.originalPaint);
+      const c = sf.shape.coords(index); sf.shape.markMeshDirty(c.x, c.y, c.z);
+    }
+    sf.heated.delete(index); this.heatedTotal--;
   }
 
   /** Поджечь всё горючее в сфере. Так работают взрывы и паяльная лампа. */
@@ -193,6 +309,11 @@ export class FireSystem {
         for (const i of sprayCells(body, shape, from, to, radius)) {
           target ??= this.slot(body, shape);
           target.wet.set(i, this.cfg.wetDuration);
+          const heated = target.heated.get(i);
+          if (heated) {
+            heated.temperature = 20 + (heated.temperature - 20) * Math.max(0, 1 - power * 0.7);
+            this.tintHeat(target, i, heated);
+          }
           const cell = target.cells.get(i);
           if (!cell) continue;
           cell.heat -= power * 0.9;
@@ -227,8 +348,18 @@ export class FireSystem {
 
       if (body.destroyed || shape.solidVoxels === 0) {
         this.burningTotal -= sf.cells.size;
+        this.heatedTotal -= sf.heated.size;
         this.shapes.delete(shapeId);
         continue;
+      }
+
+      for (const [index, cell] of sf.heated) {
+        if (shape.data[index] !== cell.material || this.isSubmerged(body, shape, index)) {
+          this.forgetHeat(sf, index, true); continue;
+        }
+        cell.temperature = 20 + (cell.temperature - 20) * Math.exp(-dt / (4 + thermalTime(cell.material) * 8));
+        if (cell.temperature < 20.5) this.forgetHeat(sf, index, true);
+        else this.tintHeat(sf, index, cell);
       }
 
       // Влага испаряется.
@@ -313,7 +444,7 @@ export class FireSystem {
         }
       }
 
-      if (sf.cells.size === 0 && sf.wet.size === 0) this.shapes.delete(shapeId);
+      if (sf.cells.size === 0 && sf.wet.size === 0 && sf.heated.size === 0) this.shapes.delete(shapeId);
     }
 
     res.burning = this.burningTotal;
@@ -322,8 +453,10 @@ export class FireSystem {
 
   /** Полное тушение — для рестарта миссии. */
   reset(): void {
+    for (const sf of this.shapes.values()) for (const index of sf.heated.keys()) this.forgetHeat(sf, index, true);
     this.shapes.clear();
     this.burningTotal = 0;
+    this.heatedTotal = 0;
     this.rng = makeRng(this.cfg.seed);
   }
 

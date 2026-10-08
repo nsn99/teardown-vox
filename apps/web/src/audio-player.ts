@@ -282,10 +282,10 @@ export class AudioPlayer {
 
     const low = ctx.createBiquadFilter();
     low.type = 'lowpass';
-    low.frequency.value = 1400;
+    low.frequency.value = cue.id === 'flamethrower' ? 900 : 1400;
 
     const flicker = ctx.createOscillator();
-    flicker.frequency.value = 7;
+    flicker.frequency.value = cue.id === 'flamethrower' ? 18 : 7;
     const flickerDepth = ctx.createGain();
     flickerDepth.gain.value = 300;
     flicker.connect(flickerDepth).connect(low.frequency);

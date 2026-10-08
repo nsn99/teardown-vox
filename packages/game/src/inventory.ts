@@ -151,11 +151,14 @@ export class Inventory {
   }
 
   restore(state: InventoryState): void {
+    // Старые сохранения ещё не знают об огнемёте: оставляем новым слотам
+    // начальные значения вместо undefined/NaN и пустого магазина.
+    const fresh = new Inventory({ unlimited: this.unlimited }).snapshot();
     this.state = {
-      active: state.active,
-      tiers: { ...state.tiers },
-      ammo: { ...state.ammo },
-      cooldown: { ...state.cooldown },
+      active: TOOL_IDS.includes(state.active) ? state.active : 'sledge',
+      tiers: { ...fresh.tiers, ...state.tiers },
+      ammo: { ...fresh.ammo, ...state.ammo },
+      cooldown: { ...fresh.cooldown, ...state.cooldown },
     };
   }
 }

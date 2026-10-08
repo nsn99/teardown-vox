@@ -271,28 +271,68 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
     }
 
     case 'boat': {
-      // Низ корпуса: узкий киль.
-      shape.fill({ x0: 2, x1: 39, y0: 0, y1: 2, z0: 8, z1: 14 }, material);
-
-      // Корма широкая, к носу корпус ступенчато сужается.
-      shape.fill({ x0: 1, x1: 30, y0: 2, y1: 5, z0: 4, z1: 18 }, material);
-      shape.fill({ x0: 30, x1: 39, y0: 2, y1: 5, z0: 5, z1: 17 }, material);
-      shape.fill({ x0: 39, x1: 45, y0: 2, y1: 5, z0: 7, z1: 15 }, material);
-      shape.fill({ x0: 45, x1: 49, y0: 3, y1: 6, z0: 9, z1: 13 }, material);
-      shape.fill({ x0: 49, x1: 52, y0: 4, y1: 7, z0: 10, z1: 12 }, material);
-
-      // Верхние борта повторяют тот же клиновидный нос.
-      shape.fill({ x0: 0, x1: 31, y0: 5, y1: 8, z0: 2, z1: 20 }, material);
-      shape.fill({ x0: 31, x1: 40, y0: 5, y1: 8, z0: 4, z1: 18 }, material);
-      shape.fill({ x0: 40, x1: 46, y0: 5, y1: 8, z0: 6, z1: 16 }, material);
-      shape.fill({ x0: 46, x1: 50, y0: 6, y1: 9, z0: 8, z1: 14 }, material);
-      shape.fill({ x0: 50, x1: 52, y0: 7, y1: 10, z0: 10, z1: 12 }, material);
-
-      // Палуба не доходит до самого носа.
-      shape.fill({ x0: 2, x1: 43, y0: 8, y1: 9, z0: 3, z1: 19 }, material);
-
-      // Небольшая рубка ближе к корме.
-      addVehicleCabin(shape, material, 8, 24, 8, y - 2, 6, z - 6);
+      // Белый катер с двумя носовыми поплавками и низкой гранёной рубкой.
+      // Все детали принадлежат разрушаемому корпусу, включая остекление.
+      const white = 0xe5e9e6, trim = 0xa4afad, dark = 0x263239, glass = 0x192631;
+      const part = (x0: number, x1: number, y0: number, y1: number,
+        z0: number, z1: number, mat: Mat, color: number): void => {
+        shape.fill({ x0, x1, y0, y1, z0, z1 }, mat);
+        for (let bx = x0; bx < x1; bx++) for (let by = y0; by < y1; by++)
+          for (let bz = z0; bz < z1; bz++) shape.paint.set(shape.idx(bx, by, bz), 0x1000000 | color);
+      };
+      // Скулы расширяются к палубе; у носа остаётся настоящий сквозной вырез.
+      for (let bx = 1; bx < x; bx++) {
+        const endInset = bx < 4 ? 4 - bx : Math.max(0, bx - 47);
+        for (let by = 0; by < 8; by++) {
+          const inset = Math.max(endInset, by < 2 ? 3 : by < 4 ? 2 : by < 6 ? 1 : 0);
+          const lo = 1 + inset, hi = z - lo;
+          if (lo >= hi) continue;
+          const split = bx >= 43 || by < 4;
+          const gap = bx >= 43 ? 2 + Math.floor((bx - 43) / 4) : 3;
+          const color = by < 2 ? trim : white;
+          if (split) {
+            if (lo < z / 2 - gap) part(bx, bx + 1, by, by + 1, lo, z / 2 - gap, material, color);
+            if (z / 2 + gap < hi) part(bx, bx + 1, by, by + 1, z / 2 + gap, hi, material, color);
+          } else {
+            part(bx, bx + 1, by, by + 1, lo, hi, material, color);
+          }
+        }
+      }
+      // Кормовая площадка и привальный брус.
+      part(0, 5, 4, 5, 3, z - 3, material, white);
+      for (const bz of [1, z - 2]) part(4, 46, 5, 6, bz, bz + 1, material, trim);
+      // Рубка с наклонными бортами, кормой и лобовым стеклом.
+      // Два вокселя в наклонных панелях сохраняют связность соседних ступеней.
+      for (let by = 8; by < y; by++) {
+        const layer = by - 8, rear = 6 + Math.floor(layer / 2), front = 36 - layer;
+        const side = 2 + Math.floor(layer / 3);
+        if (by === y - 1) {
+          part(rear, front + 2, by, by + 1, side, z - side, material, white);
+          continue;
+        }
+        part(rear, rear + 2, by, by + 1, side, z - side, material, white);
+        part(front, front + 2, by, by + 1, side, z - side, material, white);
+        for (const bz of [side, z - side - 2]) {
+          part(rear, front + 2, by, by + 1, bz, bz + 2, material, white);
+          if (by >= 9 && by <= 13) part(rear + 4, front, by, by + 1, bz, bz + 2, Mat.Glass, glass);
+        }
+        if (by >= 9 && by <= 14) {
+          part(front, front + 2, by, by + 1, side + 2, z - side - 2, Mat.Glass, glass);
+          part(front, front + 2, by, by + 1, 10, 11, material, dark);
+        }
+      }
+      // Два кресла, приборная панель и штурвал ниже линии взгляда.
+      for (const bz of [5, 13]) {
+        part(18, 24, 8, 10, bz, bz + 4, Mat.Plastic, dark);
+        part(18, 20, 10, 12, bz, bz + 4, Mat.Plastic, dark);
+      }
+      part(29, 32, 8, 10, 7, 15, Mat.Plastic, dark);
+      part(29, 31, 10, 11, 8, 14, Mat.Plastic, trim);
+      part(28, 29, 10, 12, 7, 10, Mat.Plastic, dark);
+      // Кормовые вентиляционные щели и небольшие бортовые огни.
+      for (const bz of [6, 9, 12, 15]) part(1, 2, 5, 6, bz, bz + 1, material, dark);
+      part(34, 36, 7, 8, 1, 2, Mat.Plastic, 0xc65a4b);
+      part(34, 36, 7, 8, z - 2, z - 1, Mat.Plastic, 0x5e9d78);
       break;
     }
 
@@ -555,6 +595,7 @@ export class Vehicle {
   }
 
   get driverEye(): Vec3 {
+    if (this.spec.kind === 'boat') return transformPoint(this.body.transform, v3(0, 12.5 * this.voxelSize, -3 * this.voxelSize));
     return this.deck ? transformPoint(this.body.transform, v3(3.3, 2.2, 0)) : add(this.position, v3(0, 1.4, 0));
   }
 

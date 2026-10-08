@@ -15,7 +15,7 @@ import {
 } from '@tvox/game';
 
 describe('каталог инструментов', () => {
-  it('ровно семь инструментов из дизайн-документа', () => {
+  it('восемь инструментов, включая огнемёт', () => {
     expect(TOOL_IDS).toEqual([
       'sledge',
       'spraycan',
@@ -24,6 +24,7 @@ describe('каталог инструментов', () => {
       'shotgun',
       'explosive',
       'planks',
+      'flamethrower',
     ]);
   });
 
@@ -61,9 +62,9 @@ describe('каталог инструментов', () => {
     expect(toolBySlot(99)).toBeNull();
   });
 
-  it('только лампа и заряд поджигают', () => {
+  it('лампа, заряд и огнемёт поджигают', () => {
     const igniting = TOOL_IDS.filter((id) => TOOLS[id].ignites);
-    expect(igniting.sort()).toEqual(['blowtorch', 'explosive']);
+    expect(igniting.sort()).toEqual(['blowtorch', 'explosive', 'flamethrower']);
   });
 
   it('кувалда слабее металла, лампа сильнее', () => {
@@ -102,7 +103,7 @@ describe('инвентарь', () => {
     expect(inv.selectSlot(5)).toBe(false);
     expect(inv.selectSlot(42)).toBe(false);
     inv.select('sledge');
-    expect(inv.cycle(-1)).toBe('planks');
+    expect(inv.cycle(-1)).toBe('flamethrower');
     expect(inv.cycle(1)).toBe('sledge');
   });
 

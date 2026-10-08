@@ -9,6 +9,7 @@ import {
   add,
   carve,
   distance,
+  cross,
   explode,
   length,
   normalize,
@@ -59,6 +60,8 @@ export interface ToolUseResult {
   painted?: number;
   ignited?: number;
   doused?: number;
+  heated?: number;
+  meltPoints?: Vec3[];
   /** Струя достигла поверхности в пределах дальности инструмента. */
   sprayHitSurface?: boolean;
   /** Куда пришёлся эффект. */
@@ -124,6 +127,35 @@ export function useTool(ctx: ToolContext): ToolUseResult {
         inv.consume(id);
         return { used: true, tool: id, removed: res.removed, ignited, point };
       });
+
+    case 'flamethrower': {
+      inv.consume(id);
+      const side = normalize(cross(dir, Math.abs(dir.y) > 0.95 ? v3(1, 0, 0) : v3(0, 1, 0)));
+      const up = normalize(cross(side, dir));
+      const seen = new Set<string>();
+      let ignited = 0, removed = 0, heated = 0;
+      const meltPoints: Vec3[] = [];
+      // Лучи останавливаются на первой поверхности, включая воду. Поэтому
+      // струя не поджигает предметы сквозь стену и не заливает всю сферу насквозь.
+      for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) {
+        if (a * a + b * b > 9) continue;
+        const spread = add(scale(side, a * stats.radius / 3), scale(up, b * stats.radius / 3));
+        const ray = normalize(add(scale(dir, stats.range), spread));
+        const target = world.raycast(ctx.origin, ray, { maxDistance: stats.range, ignore: ctx.ignoreBodies });
+        if (!target || ctx.protect?.has(target.shape.get(target.vx, target.vy, target.vz))) continue;
+        const index = target.shape.idx(target.vx, target.vy, target.vz);
+        const targetMaterial = target.shape.data[index];
+        const key = `${target.shape.id}:${index}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const result = ctx.sim.fire.heatSurface(world, target.body, target.shape, index,
+          stats.cooldown, stats.power * (1 - target.distance / stats.range * 0.45));
+        ignited += result.ignited; removed += result.removed; heated += result.heated;
+        if (result.removed && targetMaterial === Mat.Plastic && meltPoints.length < 8) meltPoints.push(target.point);
+      }
+      return { used: true, tool: id, ignited, removed, heated, meltPoints, sprayHitSurface: !!hit,
+        point: hit?.point ?? add(ctx.origin, scale(dir, stats.range)) };
+    }
 
     case 'shotgun': {
       inv.consume(id);

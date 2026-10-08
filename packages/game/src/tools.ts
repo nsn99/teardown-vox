@@ -1,7 +1,5 @@
 /**
- * Каталог инструментов. Расширение каталога вне текущего объёма —
- * здесь ровно семь позиций из дизайн-документа, но каждая обязана
- * корректно работать с физическим движком.
+ * Каталог инструментов: каждое действие связано с физическим движком.
  *
  * Прокачка: базовый уровень 0 плюс три покупаемые ступени.
  */
@@ -13,7 +11,8 @@ export type ToolId =
   | 'blowtorch'
   | 'shotgun'
   | 'explosive'
-  | 'planks';
+  | 'planks'
+  | 'flamethrower';
 
 export const MAX_TIER = 3;
 
@@ -38,7 +37,7 @@ export interface ToolDef {
   id: ToolId;
   name: string;
   /** Как инструмент воздействует на мир. */
-  action: 'carve' | 'paint' | 'extinguish' | 'cut' | 'spread' | 'place' | 'build';
+  action: 'carve' | 'paint' | 'extinguish' | 'cut' | 'spread' | 'place' | 'build' | 'heat';
   ammo: AmmoKind;
   /** Клавиша быстрого выбора. */
   slot: number;
@@ -173,6 +172,18 @@ export const TOOLS: Record<ToolId, ToolDef> = {
       { power: 0, radius: 0.14, range: 13, damage: 0, capacity: 32, cooldown: 0.2 },
     ],
     upgradeCosts: [600, 1500, 3200],
+  },
+  flamethrower: {
+    id: 'flamethrower', name: 'Огнемёт', action: 'heat', ammo: 'gas', slot: 8,
+    ignites: true, falloff: 'linear',
+    description: 'Удерживайте огонь: дерево загорается, пластик плавится, стекло лопается от нагрева. Сталь нагревается и ослабевает.',
+    tiers: [
+      { power: 1, radius: 0.65, range: 6, damage: 0, capacity: 400, cooldown: 0.05 },
+      { power: 1.15, radius: 0.75, range: 7, damage: 0, capacity: 550, cooldown: 0.05 },
+      { power: 1.3, radius: 0.85, range: 8, damage: 0, capacity: 750, cooldown: 0.05 },
+      { power: 1.5, radius: 1, range: 9, damage: 0, capacity: 1000, cooldown: 0.05 },
+    ],
+    upgradeCosts: [1400, 3200, 6800],
   },
 };
 

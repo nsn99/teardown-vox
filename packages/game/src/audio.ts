@@ -19,6 +19,7 @@ export type SoundId =
   | 'siren'
   | 'rotor'
   | 'fire'
+  | 'flamethrower'
   | 'splash'
   | 'pickup';
 
@@ -86,6 +87,7 @@ const PITCH: Record<SoundId, number> = {
   siren: 1,
   rotor: 1,
   fire: 1,
+  flamethrower: 1,
   splash: 1.1,
   pickup: 1.2,
 };
@@ -97,6 +99,7 @@ export interface MissionAudioState {
   alarmSeconds: number;
   /** Близость преследователя, 0..1. Единица — прямо над головой. */
   pursuit?: number;
+  flamethrower?: boolean;
 }
 
 interface Pending {
@@ -256,6 +259,8 @@ export class AudioDirector {
         at: p.at,
       });
     }
+
+    if (mission?.flamethrower) out.push({ id: 'flamethrower', gain: 0.4, pitch: 1, at: null, loop: true });
 
     const burning = this.burningCount?.() ?? this.burning;
     if (burning > 0) {
