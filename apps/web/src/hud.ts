@@ -129,6 +129,7 @@ export class Hud {
 }
 
 export interface MenuHandlers {
+  onResume(): void;
   onMission(): void;
   onSandbox(): void;
   onUpgrade(tool: ToolId): void;
@@ -142,6 +143,7 @@ export class Menu {
   private shop = $('shop');
 
   constructor(private handlers: MenuHandlers) {
+    $('btn-resume').addEventListener('click', () => handlers.onResume());
     $('btn-mission').addEventListener('click', () => handlers.onMission());
     $('btn-sandbox').addEventListener('click', () => handlers.onSandbox());
     this.shop.addEventListener('click', (e) => {
@@ -149,6 +151,10 @@ export class Menu {
       if (!btn) return;
       handlers.onUpgrade((btn as HTMLElement).dataset.tool as ToolId);
     });
+  }
+
+  setResumable(enabled: boolean): void {
+    $('btn-resume').hidden = !enabled;
   }
 
   get visible(): boolean {

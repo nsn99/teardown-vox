@@ -33,11 +33,13 @@ import { ChargeView, ExtinguisherJet, FireLights, ParticleSystem, VoxelRenderer 
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
+import { TouchControls, prefersTouch } from './touch-controls.js';
 import { enableLevelDrop } from './level-drop.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 
-const renderer = new VoxelRenderer({ canvas, quality: 'medium' });
+const mobile = prefersTouch();
+const renderer = new VoxelRenderer({ canvas, quality: mobile ? 'low' : 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
 const extinguisherJet = new ExtinguisherJet();
@@ -48,7 +50,8 @@ const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
 
-const input = new Input({ canvas });
+const input = new Input({ canvas, touch: mobile });
+const touch = mobile ? new TouchControls(input, canvas) : null;
 const hud = new Hud();
 const profile = loadProfile();
 
@@ -59,6 +62,7 @@ let heist: Heist | null = null;
  */
 let level: LevelSource = portLevel;
 let paused = true;
+let canResume = false;
 let sandbox = false;
 let last = performance.now();
 /** Вид от третьего лица. Осмысленен за рулём, поэтому включается сам. */
@@ -69,6 +73,7 @@ let captureMode = false;
 let physicsReady: Promise<void> = Promise.resolve();
 
 const menu = new Menu({
+  onResume: () => resumeRun(),
   onMission: () => startRun(false),
   onSandbox: () => startRun(true),
   onUpgrade: (tool) => {
@@ -123,6 +128,7 @@ function saveProfile(): void {
 function startRun(inSandbox: boolean): void {
   player.suspend();
   sandbox = inSandbox;
+  canResume = true;
   heist?.sim.dispose();
   particles.clear();
   extinguisherJet.clear();
@@ -156,7 +162,19 @@ function startRun(inSandbox: boolean): void {
   );
   paused = false;
   last = performance.now();
+  touch?.setVisible(true);
   input.requestLock();
+}
+
+function resumeRun(): void {
+  if (!heist || !paused || !canResume) return;
+  menu.hide();
+  hud.show();
+  paused = false;
+  last = performance.now();
+  touch?.setVisible(true);
+  input.requestLock();
+  player.resume();
 }
 
 function toHub(): void {
@@ -165,6 +183,8 @@ function toHub(): void {
   player.suspend();
   hud.hide();
   input.releaseLock();
+  touch?.setVisible(false);
+  menu.setResumable(canResume);
   menu.render(profile, level.brief);
   menu.show();
 }
@@ -213,8 +233,11 @@ function wireEvents(h: Heist): void {
 
   h.events.on('heist:finished', (r) => {
     paused = true;
+    canResume = false;
     player.suspend();
     input.releaseLock();
+    touch?.setVisible(false);
+    menu.setResumable(false);
     saveProfile();
     const record = profile.record(r.missionId);
     result.show(r.success, [
@@ -413,12 +436,14 @@ function frame(now: number): void {
   if (!heist) return;
   const h = heist;
 
-  if (!captureMode && !paused && input.locked) {
+  if (!captureMode && !paused && input.active) {
     const look = input.consumeLook();
     h.yaw += look.yaw;
     h.pitch = clamp(h.pitch + look.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
     handleActions(h);
     if (paused) return;
+    const vehicle = h.driving;
+    touch?.setMode(h.operating ? 'crane' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle ? 'vehicle' : 'foot');
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT,
       h.operating ? { slew: move.right, luff: move.forward, hoist: Number(move.jump) - Number(move.crouch) } : NEUTRAL_CRANE_INPUT);
@@ -431,7 +456,7 @@ function frame(now: number): void {
     return;
   }
   // Захват мыши асинхронный: ожидание не должно закрывать новый звук.
-  if (!captureMode && !input.locked) return;
+  if (!captureMode && !input.active) return;
 
   particles.step(dt);
   extinguisherJet.step(dt);
@@ -671,13 +696,21 @@ enableLevelDrop(window, {
 canvas.addEventListener('click', () => {
   // Браузер пускает звук только после жеста — клик по канвасу и есть жест.
   if (!paused) player.resume();
-  if (!paused && !input.locked) input.requestLock();
+  if (!paused && !input.active) input.requestLock();
 });
 
 document.addEventListener('pointerlockchange', () => {
-  if (!input.locked && !paused && !menu.visible && !result.visible) {
+  if (!input.active && !paused && !menu.visible && !result.visible) {
     toHub();
   }
 });
 
 requestAnimationFrame(frame);
+
+// A call, app switch or screen lock must not leave throttle/fire held down.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !paused) toHub();
+});
+window.addEventListener('blur', () => {
+  if (mobile && !paused) toHub();
+});

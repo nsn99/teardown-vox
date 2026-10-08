@@ -13,6 +13,7 @@ export interface InputState extends CharacterInput {
 export interface InputOptions {
   sensitivity?: number;
   canvas: HTMLCanvasElement;
+  touch?: boolean;
 }
 
 /**
@@ -35,11 +36,17 @@ export class Input {
 
   sensitivity: number;
   private down = new Set<string>();
+  private virtualDown = new Set<string>();
+  private touchForward = 0;
+  private touchRight = 0;
+  private touchActive = false;
+  readonly touch: boolean;
   private canvas: HTMLCanvasElement;
   private detachers: Array<() => void> = [];
 
   constructor(opts: InputOptions) {
     this.canvas = opts.canvas;
+    this.touch = opts.touch ?? false;
     this.sensitivity = opts.sensitivity ?? 0.0022;
     this.attach();
   }
@@ -48,11 +55,42 @@ export class Input {
     return document.pointerLockElement === this.canvas;
   }
 
+  get active(): boolean {
+    return this.touch ? this.touchActive : this.locked;
+  }
+
+  reset(): void {
+    this.down.clear();
+    this.virtualDown.clear();
+    this.touchForward = this.touchRight = 0;
+    this.state.firing = false;
+    this.state.pressed.clear();
+    this.state.wheel = this.state.dYaw = this.state.dPitch = 0;
+  }
+
+  setTouchMove(forward: number, right: number): void {
+    this.touchForward = forward;
+    this.touchRight = right;
+  }
+
+  setTouchKey(code: string, held: boolean): void {
+    if (held && this.active) {
+      if (!this.virtualDown.has(code)) this.state.pressed.add(code);
+      this.virtualDown.add(code);
+    } else this.virtualDown.delete(code);
+    if (code === 'Mouse0') this.state.firing = this.virtualDown.has(code);
+  }
+
   requestLock(): void {
-    void this.canvas.requestPointerLock();
+    if (this.touch) {
+      this.reset();
+      this.touchActive = true;
+    } else void this.canvas.requestPointerLock();
   }
 
   releaseLock(): void {
+    this.touchActive = false;
+    this.reset();
     if (this.locked) document.exitPointerLock();
   }
 
@@ -79,11 +117,7 @@ export class Input {
     });
 
     this.on(window, 'keyup', (e) => this.down.delete((e as KeyboardEvent).code));
-    this.on(window, 'blur', () => {
-      this.down.clear();
-      this.state.firing = false;
-      this.state.pressed.clear();
-    });
+    this.on(window, 'blur', () => this.reset());
 
     this.on(this.canvas, 'mousedown', (e) => {
       const ev = e as MouseEvent;
@@ -129,9 +163,9 @@ export class Input {
   /** Собирает состояние осей на текущий кадр. */
   sample(): InputState {
     const s = this.state;
-    const held = (...codes: string[]) => codes.some((c) => this.down.has(c));
-    s.forward = (held('KeyW', 'ArrowUp') ? 1 : 0) - (held('KeyS', 'ArrowDown') ? 1 : 0);
-    s.right = (held('KeyD', 'ArrowRight') ? 1 : 0) - (held('KeyA', 'ArrowLeft') ? 1 : 0);
+    const held = (...codes: string[]) => codes.some((c) => this.down.has(c) || this.virtualDown.has(c));
+    s.forward = Math.max(-1, Math.min(1, this.touchForward + (held('KeyW', 'ArrowUp') ? 1 : 0) - (held('KeyS', 'ArrowDown') ? 1 : 0)));
+    s.right = Math.max(-1, Math.min(1, this.touchRight + (held('KeyD', 'ArrowRight') ? 1 : 0) - (held('KeyA', 'ArrowLeft') ? 1 : 0)));
     s.jump = held('Space');
     s.sprint = held('ShiftLeft', 'ShiftRight');
     s.crouch = held('ControlLeft', 'ControlRight', 'KeyC');
