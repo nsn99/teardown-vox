@@ -77,6 +77,17 @@ export class PortCrane {
     }
   }
 
+  snapshot() { return structuredClone({ yaw: this.yaw, angle: this.angle, ropeLength: this.ropeLength,
+    liveColumns: [...this.liveColumns], ropeRows: this.ropeRows, stayRows: this.stayRows,
+    payload: this.payload ? { bodyId: this.payload.body.id, offset: this.payload.offset,
+      rotation: this.payload.rotation, previous: this.payload.previous } : null }); }
+  restore(s: ReturnType<PortCrane['snapshot']>, bodies: Map<number, Body>): void {
+    this.yaw = s.yaw; this.angle = s.angle; this.ropeLength = s.ropeLength;
+    this.liveColumns = new Set(s.liveColumns); this.ropeRows = s.ropeRows; this.stayRows = s.stayRows;
+    const body = s.payload && bodies.get(s.payload.bodyId);
+    this.payload = s.payload && body ? { body, offset: s.payload.offset, rotation: s.payload.rotation, previous: s.payload.previous } : undefined;
+  }
+
   private findBody(name: string): Body {
     const body = [...this.sim.world.bodies.values()].find(b => b.name === name);
     if (!body || body.shapes.length !== 1 || !body.kinematic || body.passive) {

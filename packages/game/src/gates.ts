@@ -32,6 +32,9 @@ export class AutomaticGate {
     }
   }
 
+  snapshot() { return { offset: this.offset, hold: this.hold, recoilTo: this.recoilTo, retry: this.retry }; }
+  restore(s: ReturnType<AutomaticGate['snapshot']>): void { Object.assign(this, s); this.geometry.clear(); }
+
   get opening(): number { return this.offset / this.def.rise; }
 
   update(visitor: Aabb, dt: number): void {

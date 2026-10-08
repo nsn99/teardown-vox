@@ -112,6 +112,13 @@ export class Chaser {
     this.position = { ...spec.from };
   }
 
+  snapshot() { return { phase: this.phase, position: { ...this.position }, bodyId: this.body?.id, age: this.age }; }
+  restore(s: ReturnType<Chaser['snapshot']>, bodies: Map<number, Body>): void {
+    this.phase = s.phase; this.position = { ...s.position }; this.age = s.age;
+    this.body = s.bodyId ? bodies.get(s.bodyId) ?? null : null;
+    this.rotor = this.body?.shapes.find(shape => shape.name.endsWith('rotor')) ?? null;
+  }
+
   get active(): boolean {
     return this.phase !== 'idle';
   }

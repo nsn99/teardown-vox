@@ -42,14 +42,19 @@ describe('транспорт не уничтожает свою опору', () 
     expect(v.position.y).toBeCloseTo(0.02, 5);
   });
 
-  it.each(['car', 'pickup', 'bulldozer', 'excavator'] as const)('%s упирается в бетонную стену и не сносит её корпусом', kind => {
+  it.each(['car', 'pickup', 'bulldozer', 'excavator'] as const)('%s упирается в прочную стену и не сносит её корпусом', kind => {
     const sim = new Simulation(); floor(sim);
     const wall = new VoxelShape({ sx: 100, sy: 50, sz: 4, voxelSize: 0.1, grounded: true });
     wall.fill({}, Mat.Concrete); wall.transform.position = v3(-5, 0, -7);
     sim.world.addBody(new Body({ shapes: [wall] }));
     const v = new Vehicle(kind, { position: v3(0, 0.1, 0), waterLevel: -10 }); v.spawn(sim); v.speed = v.spec.maxSpeed;
+    // A broken bucket cannot cut: verify the chassis collision independently.
+    if (v.bladeShape) v.bladeShape.fill({}, Mat.Air);
     const before = wall.data.slice();
-    for (let i = 0; i < 180; i++) v.update(sim, { ...NEUTRAL_INPUT, throttle: 1 }, 1 / 60);
+    for (let i = 0; i < 180; i++) {
+      v.update(sim, { ...NEUTRAL_INPUT, throttle: 1 }, 1 / 60);
+      if (v.spec.blade) expect(v.speed).toBeGreaterThanOrEqual(0);
+    }
     expect(wall.data).toEqual(before); expect(v.position.z).toBeGreaterThan(-7 + v.spec.size.x * 0.05);
   });
 });

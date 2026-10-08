@@ -114,12 +114,14 @@ export class Hud {
         'Опустите груз между жёлтыми метками платформы\nE — закрепить/освободить · G — освободить груз · U — на колёса · F — выйти';
     } else if (vehicle?.spec.blade) {
       this.crane.hidden = false;
-      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nУдерживайте Пробел — работать ковшом · Ctrl — тормоз · U — на колёса · F — выйти`;
+      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nКовш работает при движении · T/Y — высота · [/] — скорость · Ctrl — тормоз · U — на колёса · F — выйти`;
     } else if (vehicle) {
       this.crane.hidden = false;
       this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\n` +
         (vehicle.spec.aquatic ? '' : 'U — поставить на колёса · ') + 'V — сменить вид · F — выйти';
     }
+
+    if (vehicle) this.crane.textContent += `\n${Math.round(Math.abs(vehicle.speed) * 3.6)} км/ч · лимит ${Math.round(vehicle.speedLimit * 100)}% · [ / ] — скорость`;
 
     if (this.hintTimer > 0) {
       this.hintTimer -= dt;

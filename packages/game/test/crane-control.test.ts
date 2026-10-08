@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Mat, RapierPhysics, carve, transformPoint, v3 } from '@tvox/core';
 import {
-  ChargeSystem, Heist, Inventory, NEUTRAL_CRANE_INPUT, PortCrane, docFromLevel,
+  ChargeSystem, DEFAULT_INPUT, Heist, Inventory, NEUTRAL_CRANE_INPUT, PortCrane, docFromLevel,
   levelFromDoc, parseLevelDoc, portLevel,
 } from '@tvox/game';
 import PORT_DOC from '../src/levels/port.json';
@@ -35,6 +35,20 @@ function takeYardCrate(crane: PortCrane): void {
 afterEach(() => h?.sim.dispose());
 
 describe('управление портовым краном', () => {
+  it('после выхода из пульта можно пройти мимо него на площадку лестницы', () => {
+    const c = scene(); h.character.teleport(c.exit); h.toggleCrane();
+    expect(h.toggleCrane()).toBe('port-crane');
+    for (let i = 0; i < 100; i++) {
+      const dx = 30.55 - h.character.position.x, dz = 4.85 - h.character.position.z;
+      if (Math.hypot(dx, dz) < .04) break;
+      h.character.update(h.sim.world, { ...DEFAULT_INPUT, forward: Math.min(1, Math.hypot(dx, dz) * 4) },
+        Math.atan2(-dx, -dz), 1 / 60);
+    }
+    expect(h.character.position.x).toBeCloseTo(30.55, 1);
+    expect(h.character.position.y).toBeCloseTo(10.9, 1);
+    expect(overlapsSolid(h.sim.world, h.character.aabbAt(h.character.position))).toBe(false);
+  });
+
   it('пульт доступен в кабине; посадка, выход и камера согласованы с поворотом', () => {
     const c = scene();
     expect(h.toggleCrane()).toBeNull();

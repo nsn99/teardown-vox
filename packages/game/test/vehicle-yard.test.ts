@@ -29,9 +29,10 @@ function expectFree(vehicle: Vehicle): void {
           max: v3(x + 0.01, portLevel.waterLevel - 0.01, z + 0.01),
         }, Mat.Water), `катер: нет воды под (${x}, ${z})`).toBe(true);
       } else {
-        const floor = sim.world.raycast(v3(x, 0.05, z), v3(0, -1, 0), { maxDistance: 1 });
+        const floor = sim.world.raycast(v3(x, vehicle.position.y + 0.05, z), v3(0, -1, 0), { maxDistance: 1 });
         expect(floor, `${vehicle.spec.kind}: нет покрытия под (${x}, ${z})`).not.toBeNull();
-        expect(floor!.point.y).toBeCloseTo(0, 5);
+        expect(floor!.normal.y).toBe(1);
+        expect(vehicle.position.y - floor!.point.y).toBeLessThan(0.25);
       }
     }
   } finally {
@@ -51,7 +52,7 @@ describe('пространство для транспорта в порту', (
     }
   });
 
-  it('вся наземная техника стоит вне зданий и выезжает без разрушения карты', () => {
+  it('вся наземная техника выезжает из гаража без разрушения карты', () => {
     const vehicles = parkVehicles();
     const before = sim.world.totalSolidVoxels();
     for (const vehicle of vehicles.filter(v => !v.spec.aquatic)) {

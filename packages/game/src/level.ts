@@ -233,6 +233,11 @@ export class TriggerSystem {
     return fired;
   }
 
+  snapshot() { return { inside: [...this.inside].map(([id, set]) => [id, [...set]] as const), spent: [...this.spent] }; }
+  restore(s: ReturnType<TriggerSystem['snapshot']>): void {
+    this.inside = new Map(s.inside.map(([id, values]) => [id, new Set(values)])); this.spent = new Set(s.spent);
+  }
+
   isInside(who: string, triggerId: string): boolean {
     return this.inside.get(who)?.has(triggerId) ?? false;
   }

@@ -37,7 +37,7 @@ const DEFAULTS = {
   maxCells: 4096,
 } satisfies Omit<Required<SmokeOptions>, 'wind'>;
 
-interface Cell {
+export interface Cell {
   /** Координаты ячейки в сетке. */
   x: number;
   y: number;
@@ -60,6 +60,9 @@ export class SmokeField {
   constructor(opts: SmokeOptions = {}) {
     this.cfg = { ...DEFAULTS, wind: v3(0.35, 0, 0.15), ...opts };
   }
+
+  snapshot() { return structuredClone([...this.cells]); }
+  restore(s: ReturnType<SmokeField['snapshot']>): void { this.cells = new Map(s); }
 
   get size(): number {
     return this.cells.size;

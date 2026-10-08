@@ -1341,7 +1341,19 @@
         {"op": "fill", "box": [88, 38, 98, 98, 52, 100], "mat": "glass"},
         {"op": "fill", "box": [88, 44, 98, 98, 45, 100], "mat": "metal", "color": "#566662"},
         {"op": "fill", "box": [93, 38, 98, 94, 52, 100], "mat": "metal", "color": "#566662"},
-        {"op": "fill", "box": [87, 37, 98, 99, 38, 100], "mat": "concrete", "color": "#b8b3a2"}
+        {"op": "fill", "box": [87, 37, 98, 99, 38, 100], "mat": "concrete", "color": "#b8b3a2"},
+        {
+          "op": "fill",
+          "box": [
+            40,
+            0,
+            0,
+            60,
+            27,
+            4
+          ],
+          "mat": "air"
+        }
       ]
     },
     {
@@ -2043,6 +2055,596 @@
           "mat": "metal"
         }
       ]
+    },
+    {
+      "name": "vehicle-garage",
+      "size": [
+        120,
+        32,
+        100
+      ],
+      "voxelSize": 0.2,
+      "position": [
+        50,
+        -0.2,
+        42
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            120,
+            1,
+            100
+          ],
+          "mat": "concrete"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            0,
+            1,
+            30,
+            100
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            119,
+            1,
+            0,
+            120,
+            30,
+            100
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            99,
+            120,
+            30,
+            100
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            30,
+            0,
+            120,
+            31,
+            100
+          ],
+          "mat": "metal",
+          "color": "#667675"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            0,
+            2,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            28,
+            0,
+            2,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            0,
+            26,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            28,
+            0,
+            26,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            0,
+            50,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            28,
+            0,
+            50,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            0,
+            74,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            28,
+            0,
+            74,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            0,
+            98,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            28,
+            0,
+            98,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            118,
+            1,
+            0,
+            120,
+            30,
+            2
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            118,
+            28,
+            0,
+            120,
+            30,
+            100
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            12,
+            25,
+            2,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            12,
+            49,
+            2,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            12,
+            73,
+            2,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            12,
+            97,
+            2,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            25,
+            26,
+            30,
+            27
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            50,
+            26,
+            30,
+            52
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            75,
+            26,
+            30,
+            77
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            25,
+            50,
+            30,
+            27
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            50,
+            50,
+            30,
+            52
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            75,
+            50,
+            30,
+            77
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            25,
+            74,
+            30,
+            27
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            50,
+            74,
+            30,
+            52
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            75,
+            74,
+            30,
+            77
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            25,
+            98,
+            30,
+            27
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            50,
+            98,
+            30,
+            52
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            75,
+            98,
+            30,
+            77
+          ],
+          "mat": "metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            24,
+            1,
+            2,
+            26,
+            28,
+            99
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            48,
+            1,
+            2,
+            50,
+            28,
+            99
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            72,
+            1,
+            2,
+            74,
+            28,
+            99
+          ],
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            96,
+            1,
+            2,
+            98,
+            28,
+            99
+          ],
+          "mat": "brick"
+        }
+      ]
+    },
+    {
+      "name": "boat-shelter",
+      "size": [
+        40,
+        23,
+        20
+      ],
+      "voxelSize": 0.2,
+      "position": [
+        8,
+        -2.3,
+        -3.6
+      ],
+      "ops": [
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            0,
+            2,
+            22,
+            2
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            0,
+            18,
+            2,
+            22,
+            20
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            13,
+            0,
+            0,
+            15,
+            22,
+            2
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            13,
+            0,
+            18,
+            15,
+            22,
+            20
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            26,
+            0,
+            0,
+            28,
+            22,
+            2
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            26,
+            0,
+            18,
+            28,
+            22,
+            20
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            38,
+            0,
+            0,
+            40,
+            22,
+            2
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            38,
+            0,
+            18,
+            40,
+            22,
+            20
+          ],
+          "mat": "heavy_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            22,
+            0,
+            40,
+            23,
+            20
+          ],
+          "mat": "heavy_metal",
+          "color": "#667675"
+        }
+      ]
     }
   ],
   "props": [
@@ -2186,7 +2788,7 @@
           {"op": "fill", "box": [0, 14, 2, 2, 30, 30], "mat": "glass", "color": "#a1cfdd"},
           {"op": "fill", "box": [18, 14, 17, 20, 30, 30], "mat": "glass", "color": "#a1cfdd"},
           {"op": "fill", "box": [2, 14, 30, 18, 30, 32], "mat": "glass", "color": "#a1cfdd"},
-          {"op": "fill", "box": [18, 5, 4, 20, 28, 16], "mat": "air"},
+          {"op": "fill", "box": [18, 5, 3, 20, 29, 19], "mat": "air"},
           {"op": "fill", "box": [0, 21, 14, 2, 23, 16], "mat": "metal", "color": "#dba53b"},
           {"op": "fill", "box": [0, 14, 15, 2, 30, 17], "mat": "metal", "color": "#dba53b"},
           {"op": "fill", "box": [9, 14, 0, 11, 30, 2], "mat": "metal", "color": "#dba53b"},
@@ -2697,21 +3299,21 @@
       "id": "van",
       "kind": "pickup",
       "position": [
-        44,
+        57.2,
         0.1,
-        28
+        53
       ],
-      "yaw": 3.141592653589793
+      "yaw": 0
     },
     {
       "id": "car",
       "kind": "car",
       "position": [
-        38,
+        52.4,
         0.1,
-        30
+        53
       ],
-      "yaw": 3.141592653589793
+      "yaw": 0
     },
     {
       "id": "boat",
@@ -2727,29 +3329,29 @@
       "id": "dozer",
       "kind": "bulldozer",
       "position": [
-        28,
+        62.0,
         0.1,
-        43
+        53
       ],
-      "yaw": -1.5707963267948966
+      "yaw": 0
     },
     {
       "id": "digger",
       "kind": "excavator",
       "position": [
-        14,
+        66.8,
         0.1,
-        50
+        53
       ],
-      "yaw": -1.5707963267948966
+      "yaw": 0
     },
     {
       "id": "cargo-truck",
       "kind": "truck",
       "position": [
-        42.8,
+        71.6,
         0.1,
-        5
+        53
       ],
       "yaw": 0
     }

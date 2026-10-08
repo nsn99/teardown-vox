@@ -20,7 +20,7 @@ export interface DestructionQueueOptions {
   timeBudgetMs?: number;
 }
 
-interface Job {
+export interface DestructionJob {
   brush: Brush;
   opts: CarveOptions;
   /** Сколько вокселей уже снято этим заданием — для диагностики. */
@@ -55,11 +55,19 @@ export interface FlushResult {
  * копится, и разбиение вызова меняло бы результат.
  */
 export class DestructionQueue {
-  private jobs: Job[] = [];
+  private jobs: DestructionJob[] = [];
   private cfg: Required<DestructionQueueOptions>;
 
   constructor(opts: DestructionQueueOptions = {}) {
     this.cfg = { ...DEFAULTS, ...opts };
+  }
+
+  snapshot(): DestructionJob[] { return structuredClone(this.jobs); }
+  restore(saved: DestructionJob[], bodyIds: Map<number, number>): void {
+    this.jobs = structuredClone(saved);
+    for (const job of this.jobs) if (job.opts.ignoreBodies) {
+      job.opts.ignoreBodies = new Set([...job.opts.ignoreBodies].flatMap(id => bodyIds.has(id) ? [bodyIds.get(id)!] : []));
+    }
   }
 
   get pending(): number {

@@ -13,6 +13,11 @@ export class TruckDeck {
     this.min = v3(-46 * size, 12 * size, -16 * size);
     this.max = v3(16 * size, 40 * size, 16 * size);
   }
+  snapshot() { return [...this.loads.values()].map(l => ({ bodyId: l.body.id, local: structuredClone(l.local) })); }
+  restore(s: ReturnType<TruckDeck['snapshot']>, bodies: Map<number, Body>): void {
+    this.loads.clear(); for (const l of s) { const body = bodies.get(l.bodyId); if (body) this.loads.set(body.id, { body, local: l.local }); }
+  }
+
   get count(): number { return this.loads.size; }
   get mass(): number { return [...this.loads.values()].reduce((n, load) => n + load.body.mass(), 0); }
 

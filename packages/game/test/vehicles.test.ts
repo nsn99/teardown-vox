@@ -330,16 +330,16 @@ describe('силуэт техники', () => {
     expect(shape.get(34, 20, 17)).toBe(Mat.Air);
     expect(shape.get(24, 18, 17)).toBe(Mat.Glass);
     expect(shape.get(51, 10, 17)).toBe(Mat.Air);
-    expect(shape.get(57, 3, 17)).toBe(Mat.HeavyMetal);
-    expect(shape.get(55, 13, 17)).toBe(Mat.HeavyMetal);
-    expect(shape.get(57, 13, 17)).toBe(Mat.Air);
+    expect(v.bladeShape!.get(57, 3, 17)).toBe(Mat.HeavyMetal);
+    expect(v.bladeShape!.get(55, 13, 17)).toBe(Mat.HeavyMetal);
+    expect(v.bladeShape!.get(57, 13, 17)).toBe(Mat.Air);
   });
 
   it('окраска различает части бульдозера и сохраняет сталь и стекло', () => {
     const v = new Vehicle('bulldozer', { position: v3(0, 0.1, 0) });
     const shape = v.body.shapes[0];
-    const colors = [shape.idx(20, 2, 4), shape.idx(16, 25, 17), shape.idx(57, 3, 17)]
-      .map(i => shape.paint.get(i)!);
+    const colors = [shape.paint.get(shape.idx(20, 2, 4))!, shape.paint.get(shape.idx(16, 25, 17))!,
+      v.bladeShape!.paint.get(shape.idx(57, 3, 17))!];
     expect(new Set(colors).size).toBe(3);
     expect(colors.every(c => c >= 0x1000000)).toBe(true);
     expect(shape.paint.has(shape.idx(24, 18, 17))).toBe(false);

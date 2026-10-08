@@ -81,6 +81,8 @@ export class Input {
     if (code === 'Mouse0') this.state.firing = this.virtualDown.has(code);
   }
 
+  held(code: string): boolean { return this.down.has(code) || this.virtualDown.has(code); }
+
   requestLock(): void {
     if (this.touch) {
       this.reset();

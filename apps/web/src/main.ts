@@ -9,6 +9,8 @@ import {
   NEUTRAL_CRANE_INPUT,
   Profile,
   MAX_TIER,
+  SessionCheckpoint,
+  SessionSave,
   TOOL_IDS,
   TOOLS,
   ToolId,
@@ -35,6 +37,7 @@ import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
 import { TouchControls, prefersTouch } from './touch-controls.js';
+import { saveSession, loadSession } from './session-store.js';
 import { enableLevelDrop } from './level-drop.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -64,6 +67,32 @@ let heist: Heist | null = null;
 let level: LevelSource = portLevel;
 let paused = true;
 let canResume = false;
+let checkpoint: SessionCheckpoint | null = null;
+let savedSession: SessionSave | null = null;
+let saving = false;
+const saveStatus = document.getElementById('session-status')!;
+const loadButton = document.getElementById('btn-load-session') as HTMLButtonElement;
+loadButton.addEventListener('click', () => { if (savedSession) startRun(savedSession.sandbox, savedSession); });
+document.getElementById('btn-save-session')!.addEventListener('click', () => { void persistSession(); });
+void loadSession().then(saved => {
+  if (!saved || saved.levelId !== level.id || canResume) return;
+  savedSession = saved; loadButton.hidden = false;
+  saveStatus.textContent = `Есть сохранение: ${new Date(saved.savedAt).toLocaleString('ru-RU')}`;
+}).catch(() => { saveStatus.textContent = 'Хранилище сохранений недоступно в этом браузере'; });
+
+async function persistSession(): Promise<void> {
+  if (saving || !checkpoint || !canResume) return;
+  saving = true;
+  saveStatus.textContent = 'Сохранение…';
+  try {
+    const saved = checkpoint.capture();
+    await saveSession(saved);
+    savedSession = saved; loadButton.hidden = false;
+    saveStatus.textContent = `Сохранено ${new Date(saved.savedAt).toLocaleTimeString('ru-RU')}`;
+  } catch { saveStatus.textContent = 'Не удалось сохранить: проверьте свободное место и настройки браузера'; }
+  finally { saving = false; }
+}
+setInterval(() => { if (!paused) void persistSession(); }, 20_000);
 let sandbox = false;
 let last = performance.now();
 /** Вид от третьего лица. Осмысленен за рулём, поэтому включается сам. */
@@ -140,10 +169,11 @@ function saveProfile(): void {
 
 // ---------------------------------------------------------------------------
 
-function startRun(inSandbox: boolean): void {
+function startRun(inSandbox: boolean, saved?: SessionSave): void {
   player.suspend();
   sandbox = inSandbox;
   canResume = true;
+  document.getElementById('btn-save-session')!.hidden = false;
   heist?.sim.dispose();
   particles.clear();
   extinguisherJet.clear();
@@ -152,6 +182,18 @@ function startRun(inSandbox: boolean): void {
 
   heist = new Heist({ level, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
   heist.start();
+  checkpoint = new SessionCheckpoint(heist);
+  if (saved) {
+    try { checkpoint.restore(saved); }
+    catch {
+      heist.sim.dispose(); heist = null; checkpoint = null; canResume = false; paused = true;
+      menu.setResumable(false); menu.show();
+      document.getElementById('btn-save-session')!.hidden = true;
+      saveStatus.textContent = 'Не удалось восстановить сессию: карта или сохранение несовместимы';
+      return;
+    }
+  }
+  thirdPerson = heist.driving !== null;
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
   renderer.prime();
@@ -179,6 +221,7 @@ function startRun(inSandbox: boolean): void {
   last = performance.now();
   touch?.setVisible(true);
   input.requestLock();
+  void persistSession();
 }
 
 function resumeRun(): void {
@@ -193,6 +236,7 @@ function resumeRun(): void {
 }
 
 function toHub(): void {
+  void persistSession();
   paused = true;
   extinguisherJet.clear();
   player.suspend();
@@ -321,8 +365,10 @@ function handleActions(h: Heist): void {
   }
 
   if (input.take('KeyF')) {
+    const wasOperating = h.operatingId !== null;
     const craneId = h.toggleCrane();
-    const id = craneId ?? h.toggleVehicle();
+    const id = craneId ?? (wasOperating ? null : h.toggleVehicle());
+    if (wasOperating && !id) hud.message('Выход завален. Поверните кабину к свободной площадке.', 2);
     if (id) {
       // За рулём вид от третьего лица уместнее: видно габариты и то, во что
       // ты сейчас въедешь. Пешком — обратно от первого.
@@ -349,6 +395,9 @@ function handleActions(h: Heist): void {
     thirdPerson = !thirdPerson;
     hud.message(thirdPerson ? 'Вид от третьего лица' : 'Вид от первого лица', 1.2);
   }
+
+  if (input.take('BracketLeft') && h.driving) h.driving.speedLimit = Math.max(0.2, h.driving.speedLimit - 0.2);
+  if (input.take('BracketRight') && h.driving) h.driving.speedLimit = Math.min(1, h.driving.speedLimit + 0.2);
 
   if (input.take('KeyU') && h.driving) {
     const result = h.driving.recover(h.sim);
@@ -436,7 +485,8 @@ function readVehicleInput(): VehicleInput {
   vehicleInput.throttle = s.forward;
   vehicleInput.steer = s.right;
   vehicleInput.brake = s.crouch;
-  vehicleInput.blade = s.jump;
+  vehicleInput.blade = false;
+  vehicleInput.bladeLift = Number(input.held('KeyT')) - Number(input.held('KeyY'));
   return vehicleInput;
 }
 
@@ -460,6 +510,7 @@ function frame(now: number): void {
     const vehicle = h.driving;
     touch?.setMode(h.operating ? 'crane' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle ? 'vehicle' : 'foot');
     touch?.setTool(TOOLS[h.inventory.active].name);
+    if (vehicle) touch?.setSpeed(Math.abs(vehicle.speed) * 3.6, vehicle.speedLimit);
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT,
       h.operating ? { slew: move.right, luff: move.forward, hoist: Number(move.jump) - Number(move.crouch) } : NEUTRAL_CRANE_INPUT);
@@ -730,3 +781,14 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('blur', () => {
   if (mobile && !paused) toHub();
 });
+
+// Context loss is recoverable on some phones. Preserve the world before offering resume.
+canvas.addEventListener('webglcontextlost', event => {
+  event.preventDefault();
+  toHub();
+  hud.message('Графика была остановлена браузером. Сессия сохраняется.', 8);
+});
+canvas.addEventListener('webglcontextrestored', () => {
+  saveStatus.textContent = 'Графика восстановлена. Можно продолжить игру.';
+});
+window.addEventListener('pagehide', () => { void persistSession(); });

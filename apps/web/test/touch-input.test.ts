@@ -15,6 +15,13 @@ beforeEach(() => {
 afterEach(() => { input.dispose(); vi.unstubAllGlobals(); });
 
 describe('phone input', () => {
+  it('holds bucket lift independently of throttle and releases it on pause', () => {
+    input.requestLock(); input.setTouchMove(.5, 0); input.setTouchKey('KeyT', true);
+    expect(input.held('KeyT')).toBe(true); expect(input.sample().forward).toBe(.5);
+    input.setTouchKey('BracketLeft', true);
+    expect(input.take('BracketLeft')).toBe(true); expect(input.take('BracketLeft')).toBe(false);
+    input.releaseLock(); expect(input.held('KeyT')).toBe(false); expect(input.sample().forward).toBe(0);
+  });
   it('runs only at full forward deflection on foot, never in the crane', () => {
     expect(stickSprint('foot', 1)).toBe(true);
     expect(stickSprint('foot', 0.8)).toBe(false);

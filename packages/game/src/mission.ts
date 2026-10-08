@@ -138,6 +138,15 @@ export class Mission {
     }
   }
 
+  snapshot() { return structuredClone({ phase: this._phase, totalTime: this._totalTime,
+    alarmTime: this._alarmTime, result: this._result, carried: this.carried, targets: [...this.targets] }); }
+
+  restore(s: ReturnType<Mission['snapshot']>): void {
+    this._phase = s.phase; this._totalTime = s.totalTime; this._alarmTime = s.alarmTime;
+    this._result = s.result; this.carried = [...s.carried]; this.targets.clear();
+    for (const [id, target] of s.targets) this.targets.set(id, structuredClone(target));
+  }
+
   get phase(): MissionPhase {
     return this._phase;
   }

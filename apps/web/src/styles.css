@@ -239,7 +239,7 @@ html, body {
 .btn--primary { background: var(--accent); border-color: var(--accent); color: #14100c; font-weight: 600; }
 .btn--primary:hover { background: #ffa062; }
 
-.menu__buttons { display: flex; gap: 10px; margin-bottom: 18px; }
+.menu__buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
 
 .menu__help summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .menu__help table { margin-top: 10px; font-size: 13px; color: var(--muted); border-collapse: collapse; }
@@ -413,3 +413,8 @@ body.is-dropping::after {
 .touch-ui .targets { top: 64px; }
 .touch-ui .alarm { margin-top: 0; }
 .touch-ui .chase { top: 98px; }
+.touch-speed { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 106px); display: flex; align-items: center; gap: 5px; }
+.touch-speed span { width: 82px; font-size: 10px; text-align: center; background: #102030aa; border-radius: 8px; padding: 5px 0; }
+.touch-lift { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px); display: flex; gap: 8px; }
+#touch-controls .touch-lift button { width: 56px; }
+#session-status { font-size: 12px; color: var(--muted); order: 4; }

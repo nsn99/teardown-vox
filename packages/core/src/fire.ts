@@ -38,7 +38,7 @@ const DEFAULTS = {
   waterLevel: -Infinity,
 } satisfies Required<FireOptions>;
 
-interface BurningCell {
+export interface BurningCell {
   index: number;
   heat: number;
   fuel: number;
@@ -81,6 +81,17 @@ export class FireSystem {
   constructor(opts: FireOptions = {}) {
     this.cfg = { ...DEFAULTS, ...opts };
     this.rng = makeRng(this.cfg.seed);
+  }
+
+  snapshot() { return [...this.shapes.values()].map(s => ({ bodyId: s.body.id, shapeId: s.shape.id,
+    cells: structuredClone([...s.cells]), wet: [...s.wet] })); }
+  restore(saved: ReturnType<FireSystem['snapshot']>, bodies: Map<number, Body>, shapes: Map<number, VoxelShape>): void {
+    this.reset();
+    for (const s of saved) { const body = bodies.get(s.bodyId), shape = shapes.get(s.shapeId);
+      if (!body || !shape) continue;
+      this.shapes.set(shape.id, { body, shape, cells: new Map(s.cells), wet: new Map(s.wet) });
+      this.burningTotal += s.cells.length;
+    }
   }
 
   get burningCount(): number {

@@ -152,6 +152,8 @@ export interface VehicleInput {
   brake: boolean;
   /** Ковш/отвал опущен: режет воксели даже на месте. */
   blade: boolean;
+  /** -1 lower, +1 raise. Working edge cuts automatically while moving. */
+  bladeLift?: number;
 }
 
 export const NEUTRAL_INPUT: VehicleInput = { throttle: 0, steer: 0, brake: false, blade: false };
@@ -386,6 +388,9 @@ export class Vehicle {
   position: Vec3;
   yaw: number;
   speed = 0;
+  speedLimit = 1;
+  bladeHeight = 0;
+  readonly bladeShape: VoxelShape | null;
   /** Разрушено — больше не едет. */
   wrecked = false;
   /** Сколько вокселей было в целом корпусе. */
@@ -428,6 +433,20 @@ export class Vehicle {
       name: `${kind}-hull`,
     });
     buildVehicleHull(shape, kind, this.spec.material);
+    this.bladeShape = this.spec.blade ? new VoxelShape({ sx: x, sy: y, sz: z,
+      voxelSize: this.voxelSize, grounded: false, name: `${kind}-blade` }) : null;
+    if (this.bladeShape) {
+      this.bladeShape.structural = false;
+      for (let bx = kind === 'bulldozer' ? 54 : 48; bx < x; bx++)
+        for (let by = 0; by < (kind === 'bulldozer' ? y : 15); by++)
+          for (let bz = 0; bz < z; bz++) {
+            this.bladeShape.set(bx, by, bz, shape.get(bx, by, bz));
+            const index = shape.idx(bx, by, bz), color = shape.paint.get(index);
+            if (color !== undefined) this.bladeShape.paint.set(index, color);
+            shape.paint.delete(index);
+            shape.set(bx, by, bz, Mat.Air);
+          }
+    }
     this.wheels = kind === 'car' || kind === 'pickup' || kind === 'truck' ? buildVehicleWheels(kind, this.voxelSize, v3(x, y, z)) : [];
     this.tracks = buildVehicleTracks(kind, this.voxelSize);
     for (const wheel of this.wheels) {
@@ -443,10 +462,11 @@ export class Vehicle {
       position: v3((-x / 2) * this.voxelSize, 0, (-z / 2) * this.voxelSize),
       rotation: { x: 0, y: 0, z: 0, w: 1 },
     };
+    if (this.bladeShape) this.bladeShape.transform = structuredClone(shape.transform);
 
     this.body = new Body({
       kind: 'dynamic',
-      shapes: [shape, ...this.wheels.map(wheel => wheel.shape)],
+      shapes: [shape, ...this.wheels.map(wheel => wheel.shape), ...(this.bladeShape ? [this.bladeShape] : [])],
       name: this.spec.name,
       tags: ['vehicle', kind],
       kinematic: true,
@@ -468,6 +488,17 @@ export class Vehicle {
     this.initialVoxels = this.body.solidVoxels;
     this.deck = kind === 'truck' ? new TruckDeck(this.body, this.voxelSize) : null;
     vehicleBodies.set(this.body, this);
+  }
+
+  snapshot() { return structuredClone({ position: this.position, yaw: this.yaw, speed: this.speed,
+    speedLimit: this.speedLimit, bladeHeight: this.bladeHeight, wrecked: this.wrecked,
+    flooded: this.flooded, drowned: this.drowned, slide: this.slide, verticalSpeed: this.verticalSpeed,
+    impactDelay: this.impactDelay, yawSpeed: this.yawSpeed, grounded: this.grounded,
+    steeringAngle: this.steeringAngle, wheelRotation: this.wheelRotation, pitch: this.pitch, roll: this.roll,
+    physicalPrevious: this.physicalPrevious, cargo: [...this.cargo] }); }
+  restore(s: ReturnType<Vehicle['snapshot']>): void {
+    const { cargo, ...state } = structuredClone(s); Object.assign(this, state);
+    this.cargo.clear(); for (const id of cargo) this.cargo.add(id);
   }
 
   get forward(): Vec3 {
@@ -579,14 +610,22 @@ export class Vehicle {
     this.updateVertical(sim, dt);
     this.updateWater(dt);
     if (!this.body.kinematic) return;
-    if (!this.wrecked && this.grounded && input.blade && this.spec.blade) this.dig(sim, dt);
+    if (!this.wrecked && this.grounded && this.spec.blade) {
+      this.bladeHeight = clamp(this.bladeHeight + (input.bladeLift ?? 0) * dt * 0.8, 0, 1.6);
+      if (this.bladeShape && this.bladeShape.transform.position.y !== this.bladeHeight) {
+        this.bladeShape.transform.position.y = this.bladeHeight;
+        this.body.collidersDirty = true;
+        this.body.collidersImmediate = true;
+      }
+      if (input.blade || input.throttle > 0 || Math.abs(this.speed) > 0.1 || input.bladeLift) this.dig(sim, dt);
+    }
 
     if (!this.canDrive() || (!this.grounded && !this.spec.aquatic)) {
       this.speed = approach(this.speed, 0, (this.grounded || this.inWater ? this.spec.brake : 0.2) * dt);
     } else if (this.impactDelay === 0) {
       const throttle = clamp(input.throttle, -1, 1);
       const target =
-        throttle >= 0 ? throttle * this.spec.maxSpeed : throttle * this.spec.reverseSpeed;
+        (throttle >= 0 ? throttle * this.spec.maxSpeed : throttle * this.spec.reverseSpeed) * clamp(this.speedLimit, 0.2, 1);
       const rate = input.brake
         ? this.spec.brake
         : Math.abs(target) > Math.abs(this.speed)
@@ -629,8 +668,8 @@ export class Vehicle {
             const outward = scale(this.forward, this.speed < 0 ? -1 : 1);
             dentVehicle(sim, this.body, add(add(this.position, scale(outward, this.spec.size.x * this.voxelSize / 2)),
               v3(0, this.spec.size.y * this.voxelSize * 0.35, 0)), scale(outward, -1), impact);
-            this.speed *= -0.25;
-            this.impactDelay = 0.4;
+            this.speed *= this.tracks.length ? 0 : -0.25;
+            this.impactDelay = this.tracks.length ? 0.06 : 0.4;
           } else this.speed *= 0.15;
           this.slide = v3(); break;
         }
@@ -684,7 +723,7 @@ export class Vehicle {
     if (closing <= 0) return;
     const m1 = Math.max(1, this.body.mass() + (this.deck?.mass ?? 0));
     const m2 = Math.max(1, other.body.mass() + (other.deck?.mass ?? 0));
-    const impulse = 1.32 * closing / (1 / m1 + 1 / m2);
+    const impulse = (this.tracks.length || other.tracks.length ? 1.04 : 1.32) * closing / (1 / m1 + 1 / m2);
     this.setHorizontalVelocity(sub(a, scale(normal, impulse / m1)));
     other.setHorizontalVelocity(add(b, scale(normal, impulse / m2)));
     const point = vehicleContactPoint(this.footprint(), other.footprint(), normal);
@@ -974,17 +1013,23 @@ export class Vehicle {
     return (shape: VoxelShape, body: Body, x: number, y: number, z: number): boolean => {
       const local = inverseTransformPoint(pose, shape.voxelCenterWorld(x, y, z, body.transform));
       // Ни под шасси, ни ниже плоскости опоры инструмент не действует.
-      return local.y > 0.15 && local.x * direction > bumper + 0.01;
+      if (local.y <= 0.15 || local.x * direction <= bumper + 0.01) return false;
+      // A low horizontal step (quay boards/ramp) is a driving surface, not a wall.
+      if (body.kind === 'static' && local.y < 0.5) {
+        const above = Math.ceil((0.55 - local.y) / shape.voxelSize);
+        if (shape.get(x, y + above, z) === Mat.Air) return false;
+      }
+      return true;
     };
   }
 
-  /** Рабочий ковш только перед отвалом и только по команде игрока. */
+  /** The working edge follows the visible blade; the road remains protected. */
   private dig(sim: Simulation, dt: number): void {
     const blade = this.spec.blade;
-    if (!blade || dt <= 0) return;
+    if (!blade || !this.bladeShape?.solidVoxels || dt <= 0) return;
     const pose = { position: this.position, rotation: this.orientation };
     const center = transformPoint(pose, v3(this.spec.size.x * this.voxelSize / 2 + blade.reach / 2,
-      0.15 + blade.halfHeight, 0));
+      0.15 + this.bladeHeight + blade.halfHeight, 0));
     carve(sim.world, { kind: 'box', center,
       halfExtents: v3(blade.reach / 2, blade.halfHeight, blade.halfWidth), rotation: this.orientation }, {
       power: blade.power, damage: 0, instant: true, falloff: 'none', cause: 'bucket',

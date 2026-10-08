@@ -277,6 +277,11 @@ export class ChargeSystem {
     return this.charges.size;
   }
 
+  restore(charges: Charge[]): void {
+    this.charges.clear(); this.nextId = 1;
+    for (const c of charges) { this.charges.set(c.id, structuredClone(c)); this.nextId = Math.max(this.nextId, c.id + 1); }
+  }
+
   list(): Charge[] {
     return [...this.charges.values()];
   }

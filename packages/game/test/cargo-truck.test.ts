@@ -32,6 +32,8 @@ describe('грузовик под кран', () => {
     const h = new Heist({ level: portLevel, sandbox: true }); h.start();
     try {
       const crane = h.cranes.get('port-crane')!, truck = h.vehicles.get('cargo-truck')!;
+      // Drive from the garage to the marked loading position before testing the crane.
+      truck.position = v3(42.8, .1, 5);
       truck.update(h.sim, NEUTRAL_INPUT, 1 / 60);
       const turnTo = (target: number) => {
         for (let i = 0; i < 200; i++) {

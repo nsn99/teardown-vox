@@ -3,27 +3,27 @@ import { Body, Mat, Simulation, VoxelShape, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, Vehicle, portLevel } from '@tvox/game';
 import { roadSim } from './helpers/vehicle-world.js';
 
-const drive = { ...NEUTRAL_INPUT, throttle: 0.5, blade: true };
+const drive = { ...NEUTRAL_INPUT, throttle: 0.5, blade: false };
 
 describe('управляемый ковш тяжёлой техники', () => {
   it.each([
     ['bulldozer', Mat.Metal], ['bulldozer', Mat.HeavyMetal], ['bulldozer', Mat.Concrete],
     ['excavator', Mat.Metal], ['excavator', Mat.HeavyMetal], ['excavator', Mat.Concrete],
-  ] as const)('%s разрушает препятствие %s только после включения ковша', (kind, material) => {
+  ] as const)('%s разрушает препятствие %s автоматическим ковшом при движении', (kind, material) => {
     const sim = roadSim();
     const wall = new VoxelShape({ sx: 80, sy: 12, sz: 4, voxelSize: 0.1, grounded: true });
     wall.fill({}, material); wall.transform.position = v3(-4, 0, -6);
     sim.world.addBody(new Body({ shapes: [wall] }));
     const vehicle = new Vehicle(kind, { position: v3(0, 0.1, 0), waterLevel: -10 }); vehicle.spawn(sim);
     const before = wall.data.slice();
-    for (let i = 0; i < 180; i++) vehicle.update(sim, { ...drive, blade: false }, 1 / 60);
+    for (let i = 0; i < 180; i++) vehicle.update(sim, NEUTRAL_INPUT, 1 / 60);
     expect(wall.data).toEqual(before); expect(vehicle.position.z).toBeGreaterThan(-5);
     for (let i = 0; i < 180; i++) vehicle.update(sim, drive, 1 / 60);
     expect(wall.solidVoxels).toBeLessThan(before.filter(mat => mat !== Mat.Air).length - 100);
     expect(vehicle.position.y).toBeCloseTo(0.02, 5);
   });
 
-  it('бульдозер повреждает контейнер порта по команде, сохраняя пол и верх за пределами отвала', () => {
+  it('бульдозер повреждает контейнер порта при движении, сохраняя пол и верх за пределами отвала', () => {
     const sim = new Simulation(); const level = portLevel.build(sim)[0];
     const container = level.shapes.find(s => s.name === 'containers')!;
     const road = level.shapes.find(s => s.name === 'vehicle-yard-south')!;
@@ -38,13 +38,15 @@ describe('управляемый ковш тяжёлой техники', () => 
     expect(vehicle.position.y).toBeCloseTo(0.02, 5);
   }, 30_000);
 
-  it('бульдозер без команды ковша не пробивает настоящий склад', () => {
+  it('бульдозер режет склад на высоте ковша, но кабина останавливается перед оставшейся стеной', () => {
     const sim = new Simulation(); const level = portLevel.build(sim)[0];
-    const warehouse = level.shapes.find(s => s.name === 'warehouse')!; const before = warehouse.data.slice();
+    const warehouse = level.shapes.find(s => s.name === 'warehouse')!; const before = warehouse.solidVoxels;
+    const above = warehouse.data.slice(warehouse.sx * warehouse.sz * 25);
     const vehicle = new Vehicle('bulldozer', { position: v3(29, 0.1, 24), yaw: Math.PI / 2, waterLevel: portLevel.waterLevel });
     vehicle.spawn(sim); vehicle.speed = 8;
     for (let i = 0; i < 180; i++) vehicle.update(sim, { ...drive, blade: false }, 1 / 60);
-    expect(warehouse.data).toEqual(before); expect(vehicle.position.x).toBeGreaterThan(26);
+    expect(warehouse.solidVoxels).toBeLessThan(before);
+    expect(warehouse.data.slice(warehouse.sx * warehouse.sz * 25)).toEqual(above); expect(vehicle.position.x).toBeGreaterThan(26);
     expect(vehicle.position.y).toBeGreaterThanOrEqual(0.02);
     expect(vehicle.position.y).toBeLessThan(0.4);
   }, 30_000);

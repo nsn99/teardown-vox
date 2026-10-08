@@ -56,6 +56,8 @@ export class TouchControls {
         <button data-code="KeyU" data-extra>На колёса</button>
       </div>
       <div class="touch-stick" aria-label="Джойстик движения"><span></span><small>Движение</small></div>
+      <div class="touch-speed" hidden><button data-code="BracketLeft" aria-label="Медленнее">−</button><span>Скорость</span><button data-code="BracketRight" aria-label="Быстрее">+</button></div>
+      <div class="touch-lift" hidden><button data-code="KeyT">Ковш ↑</button><button data-code="KeyY">Ковш ↓</button></div>
       <div class="touch-actions" aria-label="Действия">
         <button data-code="KeyF">Сесть</button>
         <button data-code="KeyE">Взять</button>
@@ -125,7 +127,7 @@ export class TouchControls {
     set('KeyE', crane ? 'Зацепить' : mode === 'truck' ? 'Закрепить' : 'Взять');
     set('Mouse0', 'Действие', foot);
     set('Mouse2', 'Подрыв', foot);
-    set('Space', crane ? 'Крюк ↑' : mode === 'blade' ? 'Отвал' : 'Прыжок', foot || crane || mode === 'blade');
+    set('Space', crane ? 'Крюк ↑' : 'Прыжок', foot || crane);
     set('ControlLeft', 'Присесть', foot);
     const brake = this.root.querySelector<HTMLButtonElement>('[data-main-brake]')!;
     brake.hidden = foot;
@@ -133,6 +135,8 @@ export class TouchControls {
     set('KeyG', 'Выгрузить', mode === 'truck');
     set('KeyU', 'На колёса', !foot && !crane && mode !== 'boat');
     this.root.querySelector<HTMLElement>('.touch-tool-picker')!.hidden = !foot;
+    this.root.querySelector<HTMLElement>('.touch-speed')!.hidden = foot || crane;
+    this.root.querySelector<HTMLElement>('.touch-lift')!.hidden = mode !== 'blade';
     this.stick.querySelector('small')!.textContent = crane ? 'Поворот / стрела' : foot ? 'Движение' : 'Руль / газ';
   }
 
@@ -140,6 +144,11 @@ export class TouchControls {
     const button = this.root.querySelector<HTMLElement>('.touch-tool-picker')!;
     const label = `${name} ▾`;
     if (button.textContent !== label) button.textContent = label;
+  }
+
+  setSpeed(kmh: number, limit: number): void {
+    const label = this.root.querySelector<HTMLElement>('.touch-speed span')!;
+    label.textContent = `${kmh.toFixed(0)} км/ч · ${Math.round(limit * 100)}%`;
   }
 
   private closePanel(): void {

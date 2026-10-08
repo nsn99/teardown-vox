@@ -194,6 +194,9 @@ export class Heist {
     return [...this.cranes.values()].find(c => c.canEnter(this.character.position)) ?? null;
   }
 
+  snapshot() { return { resultApplied: this.resultApplied }; }
+  restore(s: ReturnType<Heist['snapshot']>): void { this.resultApplied = s.resultApplied; }
+
   /** Построить уровень и перейти в разведку. */
   start(): void {
     if (this.started) return;
@@ -497,11 +500,21 @@ export class Heist {
       const id = this.operatingId!;
       const exit = crane.exit;
       // Взрыв мог завалить место у пульта: ищем свободную точку около двери.
-      let chosen = exit;
-      for (const offset of [v3(), v3(0, 0.3, 0), v3(0, 0.8, 0), v3(0, 2.5, 0)]) {
-        chosen = add(exit, offset);
-        if (!overlapsSolid(this.sim.world, this.character.aabbAt(chosen))) break;
+      let chosen: Vec3 | null = null;
+      for (const radius of [0, 0.6, 1.2, 1.8, 2.4, 3]) {
+        for (let angle = 0; angle < 8; angle++) {
+          const origin = add(exit, v3(Math.cos(angle * Math.PI / 4) * radius, 2.5,
+            Math.sin(angle * Math.PI / 4) * radius));
+          const floor = this.sim.world.raycast(origin, v3(0, -1, 0), { maxDistance: 4,
+            filter: (mat, _shape, body) => !body.passive && mat !== Mat.Water && mat !== Mat.Paint });
+          if (!floor || floor.normal.y < 0.5) continue;
+          const candidate = add(floor.point, v3(0, 0.03, 0));
+          if (!overlapsSolid(this.sim.world, this.character.aabbAt(candidate, 1.75))) { chosen = candidate; break; }
+        }
+        if (chosen) break;
       }
+      // Stay seated rather than teleport into the console or a collapsed wall.
+      if (!chosen) return null;
       this.character.teleport(chosen);
       this.operatingId = null;
       this.events.emit('crane:exited', { id });
