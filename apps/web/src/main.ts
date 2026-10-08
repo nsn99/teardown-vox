@@ -301,15 +301,23 @@ function handleActions(h: Heist): void {
   }
 
   if (input.take('KeyN')) {
-    const order = ['day', 'dusk', 'night'] as const;
+    const order = ['day', 'golden', 'dusk', 'night'] as const;
     const next = order[(order.indexOf(renderer.time) + 1) % order.length];
     renderer.setDaylight(next);
-    hud.message(next === 'day' ? 'День' : next === 'dusk' ? 'Сумерки' : 'Ночь', 1.2);
+    hud.message(next === 'day' ? 'День' : next === 'golden' ? 'Тёплый вечер' : next === 'dusk' ? 'Сумерки' : 'Ночь', 1.2);
   }
 
   if (input.take('KeyV')) {
     thirdPerson = !thirdPerson;
     hud.message(thirdPerson ? 'Вид от третьего лица' : 'Вид от первого лица', 1.2);
+  }
+
+  if (input.take('KeyU') && h.driving) {
+    const result = h.driving.recover(h.sim);
+    const messages = { recovered: 'Машина поставлена на колёса', moving: 'Дождитесь остановки машины',
+      blocked: 'Недостаточно свободного места для переворота', broken: 'Эту технику восстановить нельзя',
+      upright: 'Машина уже стоит на колёсах' };
+    hud.message(messages[result], 2);
   }
 
   if (input.take('Mouse2')) {

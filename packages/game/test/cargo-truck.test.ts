@@ -15,6 +15,19 @@ function setup(yaw = 0, material = Mat.Wood, size = 6) {
 }
 
 describe('грузовик под кран', () => {
+  it('закрепляет длинный груз, когда кран и грузовик развёрнуты под углом к мировым осям', () => {
+    const { sim, truck, cargo } = setup(0.8);
+    sim.world.removeBody(cargo);
+    const shape = new VoxelShape({ sx: 40, sy: 10, sz: 24, voxelSize: 0.1 }); shape.fill({}, Mat.Wood);
+    shape.transform.position = v3(-2, 0, -1.2);
+    const load = sim.world.addBody(new Body({ kind: 'dynamic', shapes: [shape], tags: ['cargo'],
+      transform: { position: transformPoint(truck.body.transform, v3(-1.7, 1.22, 0)), rotation: truck.orientation } }));
+    expect(truck.deck!.toggle(sim)).toBe('secured'); expect(load.tags.has('truck-load')).toBe(true);
+    const before = inverseTransformPoint(truck.body.transform, load.transform.position);
+    for (let i = 0; i < 120; i++) truck.update(sim, { ...NEUTRAL_INPUT, throttle: 0.4 }, 1 / 60);
+    const local = inverseTransformPoint(truck.body.transform, load.transform.position);
+    expect(local.x).toBeCloseTo(before.x, 6); expect(local.y).toBeCloseTo(before.y, 6); expect(local.z).toBeCloseTo(before.z, 6);
+  });
   it('настоящий кран забирает ящик со двора и опускает его в платформу грузовика', () => {
     const h = new Heist({ level: portLevel, sandbox: true }); h.start();
     try {
@@ -81,7 +94,7 @@ describe('грузовик под кран', () => {
   });
 
   it('Rapier укладывает сброшенный груз на платформу, после чего его можно закрепить и увезти', async () => {
-    const { sim, truck, cargo } = setup();
+    const { sim, truck, cargo } = setup(0.8, Mat.Wood, 12);
     cargo.transform.position.y += 1.2;
     const physics = await RapierPhysics.create(sim.world, { coarseAbove: Infinity }); sim.setPhysics(physics);
     try {
@@ -89,9 +102,9 @@ describe('грузовик под кран', () => {
       for (let i = 0; i < 150; i++) { truck.update(sim, NEUTRAL_INPUT, 1 / 60); physics.step(1 / 60); }
       expect(cargo.transform.position.y).toBeCloseTo(truck.position.y + 1.2, 1);
       expect(truck.deck!.toggle(sim)).toBe('secured');
-      const before = cargo.transform.position.z;
+      const before = { ...cargo.transform.position };
       for (let i = 0; i < 90; i++) { truck.update(sim, { ...NEUTRAL_INPUT, throttle: 0.3 }, 1 / 60); physics.step(1 / 60); }
-      expect(cargo.transform.position.z).toBeLessThan(before - 2);
+      expect(Math.hypot(cargo.transform.position.x - before.x, cargo.transform.position.z - before.z)).toBeGreaterThan(2);
       expect([...sim.world.bodies.values()][0].shapes[0].data).toEqual(roadBefore);
     } finally { physics.dispose(); }
   });

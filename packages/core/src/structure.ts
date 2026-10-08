@@ -858,6 +858,8 @@ export function extractFragment(
   });
   body.velocity = { ...sourceBody.velocity };
   body.angularVelocity = { ...sourceBody.angularVelocity };
+  sourceBody.collidersImmediate = true;
+  sourceBody.wake();
 
   const com = fragShape.centerOfMass();
   const worldCenter = add(

@@ -69,7 +69,7 @@ interface ChunkEntry {
   center: THREE.Vector3;
 }
 
-export type Daylight = 'day' | 'dusk' | 'night';
+export type Daylight = 'day' | 'golden' | 'dusk' | 'night';
 
 /** Источник света уровня: прожектор на кране, лампа над воротами. */
 export interface LevelLight {
@@ -99,13 +99,14 @@ export interface LevelLight {
 /**
  * Время суток.
  *
- * Три пресета, а не плавный цикл: миссия длится минуты, солнце за это
+ * Пресеты вместо плавного цикла: миссия длится минуты, солнце за это
  * время никуда не уйдёт, а вот выбор «день или ночь» меняет всю карту —
  * ночью читаются прожекторы, окна и огонь, днём — материалы и тени.
  */
 const DAYLIGHT: Record<Daylight, {
   sky: number;
   fogNear: number;
+  fogFar?: number;
   sun: number;
   sunColor: number;
   hemiSky: number;
@@ -129,6 +130,18 @@ const DAYLIGHT: Record<Daylight, {
     hemi: 0.86,
     skyFloor: 0.3,
     exposure: 0.92,
+  },
+  golden: {
+    sky: 0xc8cec0,
+    fogNear: 85,
+    fogFar: 430,
+    sun: 2.0,
+    sunColor: 0xffd5a0,
+    hemiSky: 0xc1cbd1,
+    hemiGround: 0x85745a,
+    hemi: 0.92,
+    skyFloor: 0.28,
+    exposure: 0.94,
   },
   dusk: {
     sky: 0x1b2a3a,
@@ -378,13 +391,15 @@ export class VoxelRenderer {
            attribute float aSky;
            varying vec3 vProps;
            varying float vSky;
-           varying vec3 vVoxelPos;`,
+           varying vec3 vVoxelPos;
+           varying vec3 vVoxelNormal;`,
         ),
         '#include <begin_vertex>',
         `#include <begin_vertex>
          vProps = aProps;
          vSky = aSky;
-         vVoxelPos = transformed;`,
+         vVoxelPos = transformed;
+         vVoxelNormal = normal;`,
       );
 
       let fragment = patch(
@@ -396,6 +411,7 @@ export class VoxelRenderer {
          varying vec3 vProps;
          varying float vSky;
          varying vec3 vVoxelPos;
+         varying vec3 vVoxelNormal;
          float tvoxHash( vec3 p ) {
            return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
          }`,
@@ -409,7 +425,19 @@ export class VoxelRenderer {
          // выглядит листом бумаги, а не бетоном. Считать в пикселе
          // дешевле, чем ломать склейку ради разноцветных вершин.
          float grain = tvoxHash( floor( vVoxelPos / uVoxel + 0.5 ) );
-         diffuseColor.rgb *= mix( 0.90, 1.07, grain );`,
+         diffuseColor.rgb *= mix( 0.90, 1.07, grain );
+         // Кирпичная палитра и шероховатость отличают кладку от дерева
+         // и окрашенной стали. Рисунок не дробит жадно склеенные грани.
+         if (vProps.x < 0.1 && vProps.y > 0.8 && vProps.y < 0.88 &&
+             diffuseColor.r > diffuseColor.g * 1.65 && diffuseColor.g > diffuseColor.b * 1.15) {
+           vec2 wall = abs(vVoxelNormal.x) > 0.5 ? vVoxelPos.zy : vVoxelPos.xy;
+           float course = floor(wall.y / 0.2);
+           vec2 brick = fract(vec2(wall.x / 0.4 + mod(course, 2.0) * 0.5, wall.y / 0.2));
+           float edge = min(min(brick.x, 1.0 - brick.x) * 0.4, min(brick.y, 1.0 - brick.y) * 0.2);
+           float joint = 1.0 - smoothstep(0.006, 0.013, edge);
+           diffuseColor.rgb *= 0.9 + 0.2 * tvoxHash(vec3(floor(wall.x / 0.4 + mod(course, 2.0) * 0.5), course, 0.0));
+           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.32, 0.28), joint * 0.75);
+         }`,
       );
       fragment = patch(
         fragment,
@@ -468,7 +496,7 @@ export class VoxelRenderer {
     const p = DAYLIGHT[time];
     this.daylight = time;
     this.scene.background = new THREE.Color(p.sky);
-    this.scene.fog = new THREE.Fog(p.sky, p.fogNear, this.camera.far);
+    this.scene.fog = new THREE.Fog(p.sky, p.fogNear, Math.min(this.camera.far, p.fogFar ?? this.camera.far));
     this.sun.intensity = p.sun;
     this.sun.color = new THREE.Color(p.sunColor);
     this.hemi.color = new THREE.Color(p.hemiSky);
@@ -576,7 +604,7 @@ export class VoxelRenderer {
       this.scene.background = base;
       fog.color = base.clone();
       fog.near = p.fogNear;
-      fog.far = this.camera.far;
+      fog.far = Math.min(this.camera.far, p.fogFar ?? this.camera.far);
       this.renderer.toneMappingExposure = p.exposure;
       return;
     }
@@ -584,7 +612,7 @@ export class VoxelRenderer {
     const smokeColor = new THREE.Color(0x8b8f94);
     this.scene.background = base.clone().lerp(smokeColor, Math.min(1, smoke * 1.4));
     fog.color = (this.scene.background as THREE.Color).clone();
-    const far = Math.min(this.camera.far, 7 / smoke);
+    const far = Math.min(this.camera.far, p.fogFar ?? this.camera.far, 7 / smoke);
     fog.far = far;
     fog.near = Math.min(p.fogNear, far * 0.12);
     this.renderer.toneMappingExposure = p.exposure * lerp(1, 0.8, smoke);
@@ -1098,7 +1126,8 @@ export class VoxelRenderer {
 
     // Тень идёт за игроком: солнце светит на его окрестность, а не на всю карту.
     this.sun.target.position.copy(this.camera.position);
-    this.sun.position.copy(this.camera.position).add(new THREE.Vector3(-40, 60, 30));
+    this.sun.position.copy(this.camera.position).add(this.daylight === 'golden'
+      ? new THREE.Vector3(-65, 38, -30) : new THREE.Vector3(-40, 60, 30));
 
     this.renderer.render(this.scene, this.camera);
   }

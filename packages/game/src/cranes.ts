@@ -2,9 +2,8 @@ import {
   Body, Mat, Quat, Simulation, Vec3, VoxelShape, add, clamp, cross, distance, dot,
   extractFragment, inverseTransformPoint, length, normalize, quatFromAxisAngle,
   quatFromEulerYXZ, quatIdentity, quatMultiply, rotateVec, scale, solveBodyStructure,
-  sub, transformPoint, v3,
+  sub, transformPoint, v3, bodyOverlapsWorld,
 } from '@tvox/core';
-import { overlapsSolid } from './character.js';
 import { CraneDef, CranePartDef } from './level.js';
 
 export interface CraneInput {
@@ -176,17 +175,14 @@ export class PortCrane {
   private obstructed(): boolean {
     const ignore = new Set(this.bodyIds);
     if (this.payload) ignore.add(this.payload.body.id);
-    if (overlapsSolid(this.sim.world, this.hook.aabb(), ignore)) return true;
+    if (bodyOverlapsWorld(this.sim.world, this.hook, this.hook.transform, ignore)) return true;
     const hit = this.sim.world.raycast(this.tip, v3(0, -1, 0), {
       maxDistance: this.ropeLength, ignore, filter: mat => mat !== Mat.Air && mat !== Mat.Water && mat !== Mat.Paint,
     });
     if (hit) return true;
     if (this.payload) {
       const body = this.payload.body;
-      const original = body.transform;
-      body.transform = this.loadPose();
-      const blocked = overlapsSolid(this.sim.world, body.aabb(), ignore);
-      body.transform = original;
+      const blocked = bodyOverlapsWorld(this.sim.world, body, this.loadPose(), ignore);
       if (blocked) return true;
     }
     return false;
@@ -288,7 +284,7 @@ export class PortCrane {
     let best = 1.1;
     for (const body of this.sim.world.bodies.values()) {
       if (body.destroyed || body.passive || body.kind !== 'dynamic' || body.kinematic || body.solidVoxels === 0 ||
-          body.tags.has('crane') || body.tags.has('target')) continue;
+          body.tags.has('crane') || body.tags.has('target') || body.tags.has('vehicle') || body.tags.has('truck-load')) continue;
       const box = body.aabb();
       const at = v3(clamp(this.grip.x, box.min.x, box.max.x), clamp(this.grip.y, box.min.y, box.max.y), clamp(this.grip.z, box.min.z, box.max.z));
       const d = distance(this.grip, at);
@@ -306,7 +302,7 @@ export class PortCrane {
       this.grip.z - clamp(this.grip.z, box.min.z + .001, box.max.z - .001),
     ));
     const ignore = new Set(this.bodyIds); ignore.add(nearest.id);
-    if (overlapsSolid(this.sim.world, nearest.aabb(), ignore)) {
+    if (bodyOverlapsWorld(this.sim.world, nearest, nearest.transform, ignore)) {
       nearest.transform.position = original;
       return 'empty';
     }

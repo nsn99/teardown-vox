@@ -569,7 +569,7 @@ function parseEnvironment(v: unknown, path: string): EnvironmentDoc {
   const o = v as Record<string, unknown>;
   if (o.backdrop !== undefined && o.backdrop !== 'port-hills') fail(`${path}.backdrop`, 'ожидался port-hills');
   if (o.daylight !== undefined && !DAYLIGHTS.has(String(o.daylight))) {
-    fail(`${path}.daylight`, `ожидался day, dusk или night, пришло ${show(o.daylight)}`);
+    fail(`${path}.daylight`, `ожидался day, golden, dusk или night, пришло ${show(o.daylight)}`);
   }
   return {
     ...(o.daylight === undefined ? {} : { daylight: o.daylight as Daylight }),
@@ -580,7 +580,7 @@ function parseEnvironment(v: unknown, path: string): EnvironmentDoc {
   };
 }
 
-const DAYLIGHTS: ReadonlySet<string> = new Set(['day', 'dusk', 'night']);
+const DAYLIGHTS: ReadonlySet<string> = new Set(['day', 'golden', 'dusk', 'night']);
 
 const TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'alarm-cable',

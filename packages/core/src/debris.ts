@@ -60,7 +60,9 @@ export function capDebris(world: VoxelWorld, opts: DebrisCapOptions = {}): Debri
     if (body.destroyed || body.kind !== 'dynamic' || body.kinematic || body.passive) continue;
     active++;
     if (!body.tags.has('debris')) continue;
-    if (cfg.restOnly && !body.sleeping && length(body.velocity) > 0.2) continue;
+    // Нулевая скорость сразу после отделения ещё не означает покой.
+    // Только солвер может подтвердить, что кусок улёгся и уснул.
+    if (cfg.restOnly && (!body.sleeping || length(body.velocity) > 0.2 || length(body.angularVelocity) > 0.2)) continue;
 
     const voxels = body.solidVoxels;
     if (voxels > cfg.keepAboveVoxels) continue;

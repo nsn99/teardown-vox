@@ -1,5 +1,10 @@
 import { Mat, Quat, Simulation, Transform, Vec3, clamp, inverseTransformPoint, quatFromAxisAngle,
-  quatFromEulerYXZ, quatMultiply, transformPoint, v3 } from '@tvox/core';
+  quatFromEulerYXZ, quatMultiply, rotateVec, transformPoint, v3 } from '@tvox/core';
+
+export interface VehicleSupportPoint extends Vec3 {
+  /** Нижний контур колеса относительно оси: край шины встречает рампу раньше её центра. */
+  probes?: readonly Vec3[];
+}
 
 export interface VehicleSupport {
   height: number;
@@ -15,20 +20,24 @@ export function vehicleOrientation(yaw: number, pitch: number, roll: number): Qu
 }
 
 /** Лучи идут от колёс/гусениц через весь путь падения, а не из-под уже пробитого пола. */
-export function vehicleSupport(sim: Simulation, pose: Transform, yaw: number, points: Vec3[], fall: number): VehicleSupport {
+export function vehicleSupport(sim: Simulation, pose: Transform, yaw: number, points: VehicleSupportPoint[], fall: number): VehicleSupport {
   const ignore = new Set<number>();
   for (const body of sim.world.bodies.values()) if (body.tags.has('vehicle') || body.tags.has('truck-load')) ignore.add(body.id);
   const levelPose = { position: pose.position, rotation: quatFromEulerYXZ(yaw + Math.PI / 2, 0) };
   const contacts: Vec3[] = [];
   for (const point of points) {
-    const p = transformPoint(pose, point);
-    p.y += 0.4;
-    const hit = sim.world.raycast(p, v3(0, -1, 0), {
-      maxDistance: 0.8 + Math.max(0, fall), ignore,
-      filter: (mat, _shape, body) => !body.passive && mat !== Mat.Water && mat !== Mat.Paint,
-    });
-    if (!hit || hit.normal.y < 0.35) continue;
-    contacts.push(inverseTransformPoint(levelPose, hit.point));
+    const foot = transformPoint(pose, point);
+    let best = -Infinity;
+    for (const probe of point.probes ?? [v3()]) {
+      const offset = rotateVec(pose.rotation, probe);
+      const p = v3(foot.x + offset.x, foot.y + offset.y + 0.4, foot.z + offset.z);
+      const hit = sim.world.raycast(p, v3(0, -1, 0), {
+        maxDistance: 0.8 + Math.max(0, fall), ignore,
+        filter: mat => mat !== Mat.Water && mat !== Mat.Paint,
+      });
+      if (hit && hit.normal.y >= 0.35) best = Math.max(best, hit.point.y - offset.y);
+    }
+    if (Number.isFinite(best)) contacts.push(inverseTransformPoint(levelPose, v3(foot.x, best, foot.z)));
   }
   if (contacts.length < 3) return { height: -Infinity, pitch: 0, roll: 0, stable: false, contacts };
   // Плоскость y = ax + bz + c: обычный МНК по фактическим точкам опоры.

@@ -10,8 +10,8 @@ export class TruckDeck {
   readonly min: Vec3;
   readonly max: Vec3;
   constructor(private truck: Body, size: number) {
-    this.min = v3(-46 * size, 12 * size, -13 * size);
-    this.max = v3(16 * size, 40 * size, 13 * size);
+    this.min = v3(-46 * size, 12 * size, -16 * size);
+    this.max = v3(16 * size, 40 * size, 16 * size);
   }
   get count(): number { return this.loads.size; }
   get mass(): number { return [...this.loads.values()].reduce((n, load) => n + load.body.mass(), 0); }
@@ -23,9 +23,12 @@ export class TruckDeck {
       if (body.destroyed || body.passive || body.kind !== 'dynamic' || body.kinematic || body.solidVoxels === 0 ||
           body.tags.has('vehicle') || body.tags.has('target') || body.tags.has('crane') || body.tags.has('crane-load') ||
           (!body.tags.has('cargo') && !body.tags.has('debris')) || length(body.velocity) > 1.5) continue;
-      const box = body.aabb();
-      const corners = Array.from({ length: 8 }, (_, i) => inverseTransformPoint(this.truck.transform,
-        v3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)));
+      const corners = body.shapes.flatMap(shape => {
+        const box = shape.localAabb();
+        return Array.from({ length: 8 }, (_, i) => inverseTransformPoint(this.truck.transform,
+          transformPoint(body.transform, v3(i & 1 ? box.max.x : box.min.x,
+            i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z))));
+      });
       const min = v3(Math.min(...corners.map(p => p.x)), Math.min(...corners.map(p => p.y)), Math.min(...corners.map(p => p.z)));
       if (corners.some(p => p.x < this.min.x - 0.08 || p.x > this.max.x + 0.08 ||
           p.z < this.min.z - 0.08 || p.z > this.max.z + 0.08) || Math.abs(min.y - this.min.y) > 0.25 ||

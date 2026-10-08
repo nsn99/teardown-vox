@@ -111,10 +111,14 @@ export class Hud {
     if (vehicle?.deck) {
       this.crane.hidden = false;
       this.crane.textContent = `ГРУЗОВИК · закреплено грузов: ${vehicle.deck.count}\n` +
-        'Опустите груз краном на платформу\nE — закрепить/освободить · G — освободить груз · F — выйти';
+        'Опустите груз между жёлтыми метками платформы\nE — закрепить/освободить · G — освободить груз · U — на колёса · F — выйти';
     } else if (vehicle?.spec.blade) {
       this.crane.hidden = false;
-      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nУдерживайте Пробел — работать ковшом · Ctrl — тормоз · F — выйти`;
+      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nУдерживайте Пробел — работать ковшом · Ctrl — тормоз · U — на колёса · F — выйти`;
+    } else if (vehicle) {
+      this.crane.hidden = false;
+      this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\n` +
+        (vehicle.spec.aquatic ? '' : 'U — поставить на колёса · ') + 'V — сменить вид · F — выйти';
     }
 
     if (this.hintTimer > 0) {

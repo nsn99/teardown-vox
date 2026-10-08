@@ -101,7 +101,8 @@ describe('рампа и падение с контейнера', () => {
         return points;
       });
       const before = road.data.slice(); let falling = false, tilted = false;
-      for (let i = 0; i < 300; i++) {
+      // Дожидаемся устойчивой посадки после контакта передним краем шин.
+      for (let i = 0; i < 420; i++) {
         vehicle.update(sim, { ...NEUTRAL_INPUT, throttle: 0.2 }, 1 / 60);
         physics.step(1 / 60); vehicle.afterPhysics();
         falling ||= !vehicle.body.kinematic;
