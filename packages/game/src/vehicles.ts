@@ -345,9 +345,7 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
       // Выхлопная труба над капотом.
       shape.fill({ x0: 32, x1: 34, y0: 16, y1: 23, z0: 10, z1: 12 }, material);
 
-      // Отвал вынесен вперёд на двух тягах; между ним и капотом виден воздух.
-      shape.fill({ x0: 43, x1: 57, y0: 5, y1: 8, z0: 5, z1: 9 }, material);
-      shape.fill({ x0: 43, x1: 57, y0: 5, y1: 8, z0: z - 9, z1: z - 5 }, material);
+      // Подвижные телескопические тяги добавляются отдельными формами.
       // Наклонная поверхность и загнутые края отвала.
       for (let by = 3; by < 14; by++) for (let bz = 1; bz < z - 1; bz++) {
         const edge = bz < 4 || bz >= z - 4 ? 1 : 0;
@@ -391,6 +389,7 @@ export class Vehicle {
   speedLimit = 1;
   bladeHeight = 0;
   readonly bladeShape: VoxelShape | null;
+  readonly bladeLinks: VoxelShape[] = [];
   /** Разрушено — больше не едет. */
   wrecked = false;
   /** Сколько вокселей было в целом корпусе. */
@@ -447,6 +446,17 @@ export class Vehicle {
             shape.set(bx, by, bz, Mat.Air);
           }
     }
+    if (kind === 'bulldozer') {
+      for (const side of [-1, 1]) for (const section of ['cylinder', 'piston']) {
+        const thick = section === 'cylinder' ? 3 : 2;
+        const link = new VoxelShape({ sx: 13, sy: thick, sz: thick, voxelSize: this.voxelSize,
+          name: `blade-${side}-${section}`, grounded: false });
+        link.fill({}, Mat.HeavyMetal); link.structural = false;
+        for (let i=0;i<link.data.length;i++) link.paint.set(i, 0x1000000 | (section==='cylinder'?0xe9b438:0xb8c4c9));
+        this.bladeLinks.push(link);
+      }
+      this.poseBladeLinks();
+    }
     this.wheels = kind === 'car' || kind === 'pickup' || kind === 'truck' ? buildVehicleWheels(kind, this.voxelSize, v3(x, y, z)) : [];
     this.tracks = buildVehicleTracks(kind, this.voxelSize);
     for (const wheel of this.wheels) {
@@ -466,7 +476,7 @@ export class Vehicle {
 
     this.body = new Body({
       kind: 'dynamic',
-      shapes: [shape, ...this.wheels.map(wheel => wheel.shape), ...(this.bladeShape ? [this.bladeShape] : [])],
+      shapes: [shape, ...this.wheels.map(wheel => wheel.shape), ...(this.bladeShape ? [this.bladeShape] : []), ...this.bladeLinks],
       name: this.spec.name,
       tags: ['vehicle', kind],
       kinematic: true,
@@ -499,6 +509,24 @@ export class Vehicle {
   restore(s: ReturnType<Vehicle['snapshot']>): void {
     const { cargo, ...state } = structuredClone(s); Object.assign(this, state);
     this.cargo.clear(); for (const id of cargo) this.cargo.add(id);
+  }
+
+  private poseBladeLinks(): void {
+    if (!this.bladeLinks.length) return;
+    const vs = this.voxelSize, hx = this.spec.size.x / 2, hz = this.spec.size.z / 2;
+    for (let side = 0; side < 2; side++) {
+      const z = (side ? this.spec.size.z - 7 : 7) - hz;
+      const start = v3((42-hx)*vs,.65,z*vs);
+      const end = v3((56-hx)*vs,.65+this.bladeHeight,z*vs);
+      const delta = sub(end,start), angle = Math.atan2(delta.y,delta.x);
+      const rotation = quatFromEulerYXZ(0,0,angle), direction = scale(delta,1/length(delta));
+      for (let part=0;part<2;part++) {
+        const link = this.bladeLinks[side*2+part];
+        const base = part ? sub(end,scale(direction,link.sx*vs)) : start;
+        const offset = rotateVec(rotation,v3(0,-link.sy*vs/2,-link.sz*vs/2));
+        link.transform={position:add(base,offset),rotation};
+      }
+    }
   }
 
   get forward(): Vec3 {
@@ -614,6 +642,7 @@ export class Vehicle {
       this.bladeHeight = clamp(this.bladeHeight + (input.bladeLift ?? 0) * dt * 0.8, 0, 1.6);
       if (this.bladeShape && this.bladeShape.transform.position.y !== this.bladeHeight) {
         this.bladeShape.transform.position.y = this.bladeHeight;
+        this.poseBladeLinks();
         this.body.collidersDirty = true;
         this.body.collidersImmediate = true;
       }

@@ -226,3 +226,24 @@ describe('описание управляемого крана в карте', (
     expect(() => parseLevelDoc(doc)).toThrow(field);
   });
 });
+
+it('перерезанная середина стрелы освобождает трос, крюк и груз, даже если основание стрелы осталось', async () => {
+  const c=scene();h.sim.setPhysics(await RapierPhysics.create(h.sim.world));
+  takeYardCrate(c);
+  for(let i=0;i<12;i++)c.update({slew:0,luff:0,hoist:1},.1);
+  const cargo=c.load!, y=cargo.aabb().min.y;
+  const s=c.boom.shapes[0];s.fill({x0:0,x1:s.sx,y0:0,y1:s.sy,z0:55,z1:61},Mat.Air);
+  c.update(NEUTRAL_CRANE_INPUT,0);
+  expect(c.hoistIntact).toBe(false);expect(c.hook.kinematic).toBe(false);expect(c.ropes.kinematic).toBe(false);
+  expect(cargo.kinematic).toBe(false);expect(c.load).toBeNull();expect(c.toggleLoad()).toBe('broken');
+  for(let i=0;i<45;i++)h.sim.step(1/60);
+  expect(cargo.aabb().min.y).toBeLessThan(y-.5);
+},45000);
+
+it('ящик на погрузочной площадке опускается на землю и остаётся доступен крюку', async () => {
+  const c=scene();h.sim.setPhysics(await RapierPhysics.create(h.sim.world));
+  const box=[...h.sim.world.bodies.values()].find(b=>b.tags.has('cargo'))!;
+  for(let i=0;i<90;i++)h.update(1/60);
+  expect(box.kinematic).toBe(false);expect(box.aabb().min.y).toBeLessThan(.1);expect(box.aabb().min.y).toBeGreaterThan(-.1);
+  takeYardCrate(c);expect(c.load).toBe(box);
+},45000);

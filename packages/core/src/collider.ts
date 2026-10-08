@@ -228,13 +228,10 @@ export function decomposeCoarse(
     }
   }
 
-  const s = shape.voxelSize * factor;
-  return boxes.map((b) => ({
-    cx: ((b.x0 + b.x1) / 2) * s,
-    cy: ((b.y0 + b.y1) / 2) * s,
-    cz: ((b.z0 + b.z1) / 2) * s,
-    hx: ((b.x1 - b.x0) / 2) * s,
-    hy: ((b.y1 - b.y0) / 2) * s,
-    hz: ((b.z1 - b.z0) / 2) * s,
-  }));
+  // Coarse cells at the shape/chunk boundary are partial. Rounding them up
+  // created an invisible 20 cm floor above the port's 30-voxel ground slab.
+  return boxesToColliders(shape, boxes.map(b => ({
+    x0: Math.max(vx0, b.x0 * factor), y0: Math.max(vy0, b.y0 * factor), z0: Math.max(vz0, b.z0 * factor),
+    x1: Math.min(vx1, b.x1 * factor), y1: Math.min(vy1, b.y1 * factor), z1: Math.min(vz1, b.z1 * factor),
+  })));
 }

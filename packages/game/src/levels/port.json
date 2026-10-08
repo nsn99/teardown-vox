@@ -2060,7 +2060,7 @@
       "name": "vehicle-garage",
       "size": [
         120,
-        32,
+        36,
         100
       ],
       "voxelSize": 0.2,
@@ -2088,8 +2088,8 @@
             0,
             1,
             0,
-            1,
-            30,
+            2,
+            32,
             100
           ],
           "mat": "brick"
@@ -2097,23 +2097,11 @@
         {
           "op": "fill",
           "box": [
-            119,
+            118,
             1,
             0,
             120,
-            30,
-            100
-          ],
-          "mat": "brick"
-        },
-        {
-          "op": "fill",
-          "box": [
-            0,
-            1,
-            99,
-            120,
-            30,
+            32,
             100
           ],
           "mat": "brick"
@@ -2122,13 +2110,25 @@
           "op": "fill",
           "box": [
             0,
-            30,
-            0,
+            1,
+            98,
             120,
-            31,
+            32,
             100
           ],
-          "mat": "metal",
+          "mat": "brick"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            34,
+            0,
+            120,
+            35,
+            100
+          ],
+          "mat": "roof_metal",
           "color": "#667675"
         },
         {
@@ -2137,512 +2137,301 @@
             0,
             1,
             0,
-            2,
-            30,
-            2
+            3,
+            34,
+            3
           ],
-          "mat": "metal"
+          "mat": "roof_metal"
         },
         {
           "op": "fill",
           "box": [
-            0,
-            28,
-            0,
-            2,
-            30,
-            100
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            1,
-            0,
-            26,
-            30,
-            2
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            28,
-            0,
-            26,
-            30,
-            100
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            0,
-            50,
-            30,
-            2
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            28,
-            0,
-            50,
-            30,
-            100
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            0,
-            74,
-            30,
-            2
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            28,
-            0,
-            74,
-            30,
-            100
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            0,
-            98,
-            30,
-            2
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            28,
-            0,
-            98,
-            30,
-            100
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            118,
+            117,
             1,
             0,
             120,
-            30,
-            2
+            34,
+            3
           ],
-          "mat": "metal"
+          "mat": "roof_metal"
         },
         {
           "op": "fill",
           "box": [
-            118,
-            28,
+            0,
+            29,
             0,
             120,
-            30,
+            34,
+            3
+          ],
+          "mat": "roof_metal",
+          "color": "#52605e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            24,
+            3,
+            34,
+            27
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            117,
+            1,
+            24,
+            120,
+            34,
+            27
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            29,
+            24,
+            120,
+            34,
+            27
+          ],
+          "mat": "roof_metal",
+          "color": "#52605e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            48,
+            3,
+            34,
+            51
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            117,
+            1,
+            48,
+            120,
+            34,
+            51
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            29,
+            48,
+            120,
+            34,
+            51
+          ],
+          "mat": "roof_metal",
+          "color": "#52605e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            72,
+            3,
+            34,
+            75
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            117,
+            1,
+            72,
+            120,
+            34,
+            75
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            29,
+            72,
+            120,
+            34,
+            75
+          ],
+          "mat": "roof_metal",
+          "color": "#52605e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            1,
+            96,
+            3,
+            34,
+            99
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            117,
+            1,
+            96,
+            120,
+            34,
+            99
+          ],
+          "mat": "roof_metal"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            29,
+            96,
+            120,
+            34,
+            99
+          ],
+          "mat": "roof_metal",
+          "color": "#52605e"
+        },
+        {
+          "op": "fill",
+          "box": [
+            58,
+            29,
+            0,
+            61,
+            34,
             100
           ],
-          "mat": "heavy_metal"
+          "mat": "roof_metal",
+          "color": "#52605e"
         },
         {
           "op": "fill",
           "box": [
-            24,
-            1,
-            12,
-            25,
-            2,
-            95
-          ],
-          "mat": "concrete",
-          "color": "#e1bd4c"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            12,
-            49,
-            2,
-            95
-          ],
-          "mat": "concrete",
-          "color": "#e1bd4c"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            12,
-            73,
-            2,
-            95
-          ],
-          "mat": "concrete",
-          "color": "#e1bd4c"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            12,
-            97,
-            2,
-            95
-          ],
-          "mat": "concrete",
-          "color": "#e1bd4c"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            1,
-            25,
-            26,
-            30,
-            27
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            1,
-            50,
-            26,
-            30,
-            52
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            1,
-            75,
-            26,
-            30,
-            77
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            25,
-            50,
-            30,
-            27
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            50,
-            50,
-            30,
-            52
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            75,
-            50,
-            30,
-            77
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            25,
-            74,
-            30,
-            27
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            50,
-            74,
-            30,
-            52
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            75,
-            74,
-            30,
-            77
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            25,
-            98,
-            30,
-            27
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            50,
-            98,
-            30,
-            52
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            75,
-            98,
-            30,
-            77
-          ],
-          "mat": "metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            24,
-            1,
-            2,
-            26,
-            28,
-            99
-          ],
-          "mat": "brick"
-        },
-        {
-          "op": "fill",
-          "box": [
-            48,
-            1,
-            2,
-            50,
-            28,
-            99
-          ],
-          "mat": "brick"
-        },
-        {
-          "op": "fill",
-          "box": [
-            72,
-            1,
-            2,
-            74,
-            28,
-            99
-          ],
-          "mat": "brick"
-        },
-        {
-          "op": "fill",
-          "box": [
-            96,
-            1,
-            2,
-            98,
-            28,
-            99
-          ],
-          "mat": "brick"
-        }
-      ]
-    },
-    {
-      "name": "boat-shelter",
-      "size": [
-        40,
-        23,
-        20
-      ],
-      "voxelSize": 0.2,
-      "position": [
-        8,
-        -2.3,
-        -3.6
-      ],
-      "ops": [
-        {
-          "op": "fill",
-          "box": [
-            0,
-            0,
-            0,
-            2,
-            22,
-            2
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            0,
-            0,
-            18,
-            2,
-            22,
-            20
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            13,
-            0,
-            0,
-            15,
-            22,
-            2
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            13,
-            0,
-            18,
-            15,
-            22,
-            20
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            26,
-            0,
-            0,
-            28,
-            22,
-            2
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            26,
-            0,
-            18,
-            28,
-            22,
-            20
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            38,
-            0,
-            0,
-            40,
-            22,
-            2
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            38,
-            0,
-            18,
-            40,
-            22,
-            20
-          ],
-          "mat": "heavy_metal"
-        },
-        {
-          "op": "fill",
-          "box": [
-            0,
-            22,
-            0,
-            40,
             23,
-            20
+            0,
+            64,
+            24,
+            1,
+            95
           ],
-          "mat": "heavy_metal",
-          "color": "#667675"
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            23,
+            0,
+            4,
+            24,
+            1,
+            32
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            47,
+            0,
+            64,
+            48,
+            1,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            47,
+            0,
+            4,
+            48,
+            1,
+            32
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            71,
+            0,
+            64,
+            72,
+            1,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            71,
+            0,
+            4,
+            72,
+            1,
+            32
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            95,
+            0,
+            64,
+            96,
+            1,
+            95
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
+        },
+        {
+          "op": "fill",
+          "box": [
+            95,
+            0,
+            4,
+            96,
+            1,
+            32
+          ],
+          "mat": "concrete",
+          "color": "#e1bd4c"
         }
       ]
     }
@@ -3243,6 +3032,96 @@
           {"op": "grid", "box": [0, 3, 0, 12, 12, 12], "cell": [1, 9, 1], "step": [11, 100, 11], "mat": "metal", "color": "#71838d"}
         ]
       }
+    },
+    {
+      "name": "Небольшой ящик",
+      "kind": "dynamic",
+      "tags": [
+        "cargo",
+        "portable"
+      ],
+      "volume": {
+        "name": "portable-wood",
+        "voxelSize": 0.05,
+        "size": [
+          8,
+          6,
+          8
+        ],
+        "position": [
+          43.5,
+          0.02,
+          12
+        ],
+        "grounded": false,
+        "ops": [
+          {
+            "op": "hollow",
+            "wall": "wood",
+            "floor": "wood",
+            "roof": "wood",
+            "thickness": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "Свободная доска",
+      "kind": "dynamic",
+      "tags": [
+        "cargo",
+        "portable"
+      ],
+      "volume": {
+        "name": "portable-plank",
+        "voxelSize": 0.05,
+        "size": [
+          36,
+          1,
+          4
+        ],
+        "position": [
+          41.0,
+          0.02,
+          12.4
+        ],
+        "grounded": false,
+        "ops": [
+          {
+            "op": "fill",
+            "mat": "plank"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Кирпич",
+      "kind": "dynamic",
+      "tags": [
+        "cargo",
+        "portable"
+      ],
+      "volume": {
+        "name": "portable-brick",
+        "voxelSize": 0.05,
+        "size": [
+          5,
+          2,
+          2
+        ],
+        "position": [
+          43,
+          0.02,
+          13
+        ],
+        "grounded": false,
+        "ops": [
+          {
+            "op": "fill",
+            "mat": "brick"
+          }
+        ]
+      }
     }
   ],
   "triggers": [
@@ -3301,7 +3180,7 @@
       "position": [
         57.2,
         0.1,
-        53
+        56
       ],
       "yaw": 0
     },
@@ -3311,7 +3190,7 @@
       "position": [
         52.4,
         0.1,
-        53
+        56
       ],
       "yaw": 0
     },
@@ -3331,7 +3210,7 @@
       "position": [
         62.0,
         0.1,
-        53
+        56
       ],
       "yaw": 0
     },
@@ -3341,7 +3220,7 @@
       "position": [
         66.8,
         0.1,
-        53
+        56
       ],
       "yaw": 0
     },
@@ -3351,7 +3230,7 @@
       "position": [
         71.6,
         0.1,
-        53
+        56
       ],
       "yaw": 0
     }

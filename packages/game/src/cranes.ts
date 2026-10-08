@@ -30,6 +30,8 @@ export class PortCrane {
   private parts: Part[];
   private base: { body: Body; shape: VoxelShape; indices: number[] };
   private boomSupport: number[];
+  private tipSupport: number[];
+  private staySupport: number[];
   private ropeShape: VoxelShape;
   private stayShape: VoxelShape;
   private liveColumns: Set<number>;
@@ -52,6 +54,8 @@ export class PortCrane {
     const grip = inverseTransformPoint(hookShape.transform, v3(0.05, -1.3, 0));
     this.gripVoxel = v3(Math.floor(grip.x / hookShape.voxelSize), Math.floor(grip.y / hookShape.voxelSize),
       Math.floor(grip.z / hookShape.voxelSize));
+    this.tipSupport = this.supportNear(def.tip);
+    this.staySupport = this.supportNear(def.stay.to);
     this.boomSupport = def.boom.support.map(p => this.parts[0].shape.idx(p.x, p.y, p.z));
     const cab = inverseTransformPoint(this.parts[0].shape.transform, sub(def.cab.control, def.house.pivot));
     const vs = this.parts[0].shape.voxelSize;
@@ -107,12 +111,32 @@ export class PortCrane {
     return { body, shape, anchors };
   }
 
+  /** Actual voxels at the sheave and stay attachment, not the transform of an empty tip. */
+  private supportNear(worldPoint: Vec3): number[] {
+    const shape = this.parts[1].shape;
+    const local = inverseTransformPoint(shape.transform, sub(worldPoint, this.def.boom.pivot));
+    const indices: number[] = [];
+    let nearest = -1, nearestDistance = Infinity;
+    for (let i = 0; i < shape.data.length; i++) {
+      if (shape.data[i] === Mat.Air) continue;
+      const c = shape.coords(i), s = shape.voxelSize;
+      const d = Math.hypot((c.x+.5)*s-local.x,(c.y+.5)*s-local.y,(c.z+.5)*s-local.z);
+      if (d < nearestDistance) { nearestDistance = d; nearest = i; }
+      if (d < .35) indices.push(i);
+    }
+    return indices.length ? indices : nearest >= 0 ? [nearest] : [];
+  }
+
+  private supported(indices: number[]): boolean {
+    return this.boom.shapes.includes(this.parts[1].shape) && indices.some(i => this.parts[1].shape.data[i] !== Mat.Air);
+  }
+
   private alive(body: Body): boolean { return !body.destroyed && body.kinematic && body.solidVoxels > 0; }
   get operable(): boolean {
     return this.alive(this.house) && this.parts[0].shape.data[this.cabIndex] !== Mat.Air;
   }
   get hoistIntact(): boolean {
-    return this.alive(this.boom) && this.alive(this.hook) && this.liveColumns.size > 0 &&
+    return this.alive(this.boom) && this.supported(this.tipSupport) && this.alive(this.hook) && this.liveColumns.size > 0 &&
       this.parts[2].shape.get(this.gripVoxel.x, this.gripVoxel.y, this.gripVoxel.z) !== Mat.Air;
   }
   get load(): Body | null { return this.payload?.body ?? null; }
@@ -229,6 +253,8 @@ export class PortCrane {
     if (!body.kinematic) return;
     body.kinematic = false;
     body.tags.add('debris');
+    for (const shape of body.shapes) { shape.grounded = false; shape.attachmentAnchors.clear(); }
+    body.velocityDirty = true;
     body.wake();
     this.sim.physics.sync(body);
   }
@@ -257,6 +283,7 @@ export class PortCrane {
     if (!this.alive(this.house)) {
       for (const body of [this.boom, this.hook, this.ropes, this.stay]) this.release(body);
     } else if (this.boomSupport.every(i => this.parts[0].shape.data[i] === Mat.Air)) this.release(this.boom);
+    if (!this.supported(this.staySupport)) this.release(this.stay);
     if (this.alive(this.stay)) {
       for (let y = 0; y < this.stayRows; y++) {
         let solids = 0;
@@ -281,7 +308,8 @@ export class PortCrane {
         break;
       }
     }
-    if (!this.alive(this.boom) || this.liveColumns.size === 0) {
+    if (!this.alive(this.boom)) this.release(this.stay);
+    if (!this.alive(this.boom) || !this.supported(this.tipSupport) || this.liveColumns.size === 0) {
       this.release(this.hook); this.release(this.ropes);
     }
     if (!this.hoistIntact || this.payload?.body.destroyed || this.payload?.body.solidVoxels === 0) this.releaseLoad();
@@ -289,6 +317,7 @@ export class PortCrane {
 
   /** Крюк берёт отдельные ящики и обломки; карта и техника остаются на месте. */
   toggleLoad(): CraneLoadResult {
+    this.checkDamage();
     if (this.payload) { this.releaseLoad(); return 'released'; }
     if (!this.hoistIntact) return 'broken';
     let nearest: Body | undefined;

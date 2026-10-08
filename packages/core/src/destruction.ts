@@ -440,28 +440,25 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
               continue;
             }
 
-            // Трещина проходит по связанному листу, но не перескакивает
-            // через раму. Общий бюджет разрушения действует и здесь.
+            // Glass breaks locally. The uneven rim remains solid, can be hit again,
+            // and is handled by the same collision/structure code as the intact pane.
             if (mat === Mat.Glass) {
-              const queue = [i];
-              const seen = new Set(queue);
-              for (let q = 0; q < queue.length && result.removed < maxVoxels; q++) {
-                const at = queue[q];
-                const gx = at % shape.sx;
-                const gz = Math.floor(at / shape.sx) % shape.sz;
-                const gy = Math.floor(at / (shape.sx * shape.sz));
-                removeVoxel(shape, at, mat, result, shapeMaterials, body, gx, gy, gz, fragments);
-                shapeRemoved++;
-                expand(region, gx, gy, gz);
-                for (const [nx, ny, nz] of [[gx-1,gy,gz], [gx+1,gy,gz], [gx,gy-1,gz], [gx,gy+1,gz], [gx,gy,gz-1], [gx,gy,gz+1]]) {
-                  if (nx < 0 || ny < 0 || nz < 0 || nx >= shape.sx || ny >= shape.sy || nz >= shape.sz) continue;
-                  const next = shape.idx(nx, ny, nz);
-                  if (shape.data[next] !== Mat.Glass || seen.has(next)) continue;
-                  if (opts.filterVoxel && !opts.filterVoxel(shape, body, nx, ny, nz)) continue;
-                  seen.add(next);
-                  queue.push(next);
+              if (cause === 'blowtorch' && !opts.instant) {
+                const heat = shape.damage[i] + Math.max(1, Math.round(opts.damage * w * 0.06));
+                if (heat < 120) {
+                  shape.damage[i] = heat;
+                  shape.markDirty(x, y, z);
+                  shapeDamaged++;
+                  expand(region, x, y, z);
+                  continue;
                 }
               }
+              // Keep a jagged outer edge, not an entire connected sheet disappearing.
+              const edge = ((x * 73856093 ^ y * 19349663 ^ z * 83492791) >>> 0) % 7 / 28;
+              if (!opts.instant && cause !== 'blowtorch' && w < edge) continue;
+              removeVoxel(shape, i, mat, result, shapeMaterials, body, x, y, z, fragments);
+              shapeRemoved++;
+              expand(region, x, y, z);
               continue;
             }
 

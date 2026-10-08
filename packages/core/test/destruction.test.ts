@@ -23,17 +23,22 @@ describe('carve: модель «сила против прочности»', () 
     const result = carve(world, { kind: 'sphere', center: voxelCenter(2, 8, 0), radius: 0.1 }, {
       power: 0.35, damage: 1, filterVoxel: (_shape, _body, _x, y) => y >= 6,
     });
-    expect(result.removed).toBe(30); expect(shape.get(2, 5, 0)).toBe(Mat.Glass);
-    expect(shape.get(2, 6, 0)).toBe(Mat.Air);
+    expect(result.removed).toBeGreaterThan(0); expect(result.removed).toBeLessThan(30); expect(shape.get(2, 5, 0)).toBe(Mat.Glass);
+    expect(shape.get(2, 8, 0)).toBe(Mat.Air);
   });
-  it('стекло рассыпается связанным листом, соседний лист остаётся целым', () => {
+  it('стекло пробивается локально, остатки и соседний лист остаются целыми', () => {
     const s = makeShape(12, 12, 3);
     s.fill({x1: 5, z1: 1}, Mat.Glass);
     s.fill({x0: 7, z1: 1}, Mat.Glass);
     const { world } = worldWith(s);
     const hit = carve(world, {kind: 'sphere', center: voxelCenter(2, 6, 0), radius: 0.1}, {power: 0.35, damage: 1});
-    expect(hit.removed).toBe(60);
-    expect(s.solidVoxels).toBe(60);
+    expect(hit.removed).toBeGreaterThan(0);
+    expect(hit.removed).toBeLessThan(60);
+    expect(s.solidVoxels).toBeGreaterThan(60);
+    expect(s.get(2, 6, 0)).toBe(Mat.Air);
+    const rest = s.solidVoxels;
+    carve(world, {kind: 'sphere', center: voxelCenter(2, 5, 0), radius: .1}, {power: .35, damage: 60});
+    expect(s.solidVoxels).toBeLessThan(rest);
     expect(s.get(9, 6, 0)).toBe(Mat.Glass);
   });
   it('листва исчезает от касания и не создаёт твёрдых частиц', () => {
@@ -400,4 +405,15 @@ describe('баллончик', () => {
     const { world } = worldWith(s);
     expect(paint(world, v3(20, 20, 20), 0.5, 1)).toBe(0);
   });
+});
+
+it('горелка сначала нагревает и темнит стекло, затем пробивает его, оставляя края', () => {
+  const s=makeShape(20,20,1); s.fill({},Mat.Glass); const {world}=worldWith(s);
+  const brush={kind:'sphere' as const,center:voxelCenter(10,10,0),radius:.28};
+  const heat={power:.75,damage:55,falloff:'none' as const,cause:'blowtorch'};
+  expect(carve(world,brush,heat).removed).toBe(0);
+  expect(s.damage[s.idx(10,10,0)]).toBeGreaterThan(0); expect(s.solidVoxels).toBe(400);
+  for(let i=0;i<50;i++)carve(world,brush,heat);
+  expect(s.get(10,10,0)).toBe(Mat.Air); expect(s.get(0,0,0)).toBe(Mat.Glass);
+  expect(s.solidVoxels).toBeGreaterThan(250);
 });

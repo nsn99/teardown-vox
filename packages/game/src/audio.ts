@@ -61,6 +61,7 @@ export function soundOfMaterial(mat: number): SoundId {
       return 'hit-glass';
     case Mat.Metal:
     case Mat.HeavyMetal:
+    case Mat.RoofMetal:
     case Mat.Cable:
       return 'hit-metal';
     case Mat.Wood:

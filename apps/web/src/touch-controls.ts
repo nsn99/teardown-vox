@@ -146,6 +146,12 @@ export class TouchControls {
     if (button.textContent !== label) button.textContent = label;
   }
 
+  setCarrying(holding: boolean): void {
+    if (this.mode !== 'foot') return;
+    this.root.querySelector<HTMLElement>('.touch-actions [data-code="KeyE"]')!.textContent = holding ? 'Положить' : 'Взять';
+    this.root.querySelector<HTMLButtonElement>('.touch-primary')!.hidden = holding;
+  }
+
   setSpeed(kmh: number, limit: number): void {
     const label = this.root.querySelector<HTMLElement>('.touch-speed span')!;
     label.textContent = `${kmh.toFixed(0)} км/ч · ${Math.round(limit * 100)}%`;

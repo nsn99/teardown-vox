@@ -47,3 +47,41 @@ describe('управление техникой и проходы', () => {
     } finally { h.sim.dispose(); }
   });
 });
+
+it('горизонтальный обзор в машине не сбрасывается, включая полный оборот', () => {
+  const h=new Heist({level:portLevel,sandbox:true}); h.start();
+  try {
+    const v=h.vehicles.get('car')!; h.character.teleport({...v.position}); h.toggleVehicle();
+    h.yaw=v.yaw+Math.PI*2+.7; h.pitch=.3;
+    h.update(1/60,DEFAULT_INPUT,NEUTRAL_INPUT);
+    expect(h.yaw-v.yaw).toBeCloseTo(Math.PI*2+.7,5); expect(h.pitch).toBe(.3);
+    h.update(1/60,DEFAULT_INPUT,{...NEUTRAL_INPUT,throttle:.5,steer:1});
+    expect(h.yaw-v.yaw).toBeCloseTo(Math.PI*2+.7,5);
+  } finally {h.sim.dispose();}
+});
+
+it('гараж — общий свободный зал с резервным рядом; над катером нет навеса', () => {
+  const h=new Heist({level:portLevel,sandbox:true}); h.start();
+  try {
+    const garage=[...h.sim.world.bodies.values()].find(b=>b.shapes.some(s=>s.name==='vehicle-garage'))!;
+    expect(garage).toBeDefined();
+    expect([...h.sim.world.bodies.values()].some(b=>b.name==='boat-shelter')).toBe(false);
+    // Full-width aisle, including all former partitions, and five empty front parking spaces.
+    expect(overlapsSolid(h.sim.world,{min:v3(50.7,.25,49),max:v3(73.3,4.5,50.8)})).toBe(false);
+    for(const x of [52.4,57.2,62,66.8,71.6])
+      expect(overlapsSolid(h.sim.world,{min:v3(x-1,.1,43),max:v3(x+1,3,47.8)})).toBe(false);
+  } finally {h.sim.dispose();}
+});
+
+it('телескопические тяги соединяют корпус и поднятый ковш бульдозера', () => {
+  const sim=roadSim();const v=new Vehicle('bulldozer',{position:v3(0,.1,0),waterLevel:-10});v.spawn(sim);
+  try {
+    expect(v.bladeLinks).toHaveLength(4);
+    for(let i=0;i<120;i++)v.update(sim,{...NEUTRAL_INPUT,bladeLift:1},1/60);
+    for(let side=0;side<2;side++){
+      const outer=v.bladeLinks[side*2].localAabb(),inner=v.bladeLinks[side*2+1].localAabb();
+      expect(inner.min.x).toBeLessThan(outer.max.x);expect(inner.min.y).toBeLessThan(outer.max.y);
+      expect(inner.max.y).toBeGreaterThan(v.bladeHeight+.5);expect(outer.min.y).toBeLessThan(.8);
+    }
+  } finally{sim.dispose();}
+});

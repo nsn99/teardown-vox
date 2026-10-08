@@ -12,6 +12,7 @@ import {
   scale,
   v3,
 } from '@tvox/core';
+import { HandCarry } from './hand-carry.js';
 import { CameraShake, ShakeState } from './camera.js';
 import { CharacterController, CharacterInput, overlapsSolid } from './character.js';
 import { Inventory } from './inventory.js';
@@ -76,6 +77,7 @@ export class Heist {
   readonly character: CharacterController;
   readonly charges = new ChargeSystem();
   readonly planks = new PlankBuilder();
+  readonly hands = new HandCarry();
   /** Вертолёт и катер: то, чем кончается таймер. */
   readonly pursuit: Pursuit;
   /**
@@ -378,6 +380,7 @@ export class Heist {
 
   /** Основное действие инструментом (ЛКМ). */
   use(): ToolUseResult {
+    if (this.hands.body) return { used: false, tool: this.inventory.active, reason: 'no-target' };
     const ctx = this.toolContext();
     if (this.inventory.active === 'explosive') {
       const charge = this.charges.place(ctx);
@@ -399,6 +402,7 @@ export class Heist {
    * Возвращает id цели, с которой что-то произошло.
    */
   interact(): string | null {
+    if (this.hands.body) return `body:${this.hands.drop(this.sim)!.id}`;
     const carried = this.mission.carriedIds[0];
     if (carried) {
       const drop = add(this.eye, scale(this.aimDirection, 1.2));
@@ -421,7 +425,7 @@ export class Heist {
     });
     if (!hit) return null;
     const tag = [...hit.body.tags].find((t) => t.startsWith('target:'));
-    if (!tag) return null;
+    if (!tag) return this.hands.pick(this.sim, this.eye, this.aimDirection) ? `body:${this.hands.body!.id}` : null;
     const id = tag.slice(7);
     if (!this.mission.pickUp(id)) return null;
     this.events.emit('target:picked', { id });
@@ -488,7 +492,9 @@ export class Heist {
       }
     }
     if (!best) return null;
+    this.hands.drop(this.sim);
     this.drivingId = best;
+    this.yaw = this.vehicles.get(best)!.yaw;
     this.events.emit('vehicle:entered', { id: best });
     return best;
   }
@@ -523,6 +529,7 @@ export class Heist {
     if (this.drivingId || this.mission.carriedIds.length > 0) return null;
     const nearby = this.nearbyCrane;
     if (!nearby) return null;
+    this.hands.drop(this.sim);
     this.operatingId = nearby.def.id;
     this.character.teleport(nearby.seat);
     this.yaw = nearby.yaw;
@@ -549,8 +556,10 @@ export class Heist {
     const visitor = veh ? veh.body.aabb() : this.character.aabbAt(this.character.position);
     for (const gate of this.gates) gate.update(visitor, dt);
     if (veh) {
+      const previousYaw = veh.yaw;
       veh.update(this.sim, vehicleInput, dt);
-      this.yaw = veh.yaw;
+      // Keep the player’s free look offset while following a turn of the chassis.
+      this.yaw += Math.atan2(Math.sin(veh.yaw - previousYaw), Math.cos(veh.yaw - previousYaw));
       this.character.teleport(add(veh.position, v3(0, 0.5, 0)));
       if (veh.wrecked) this.toggleVehicle();
     } else if (operator) {
@@ -564,6 +573,7 @@ export class Heist {
 
     // Потолок обломков считает «далеко» от игрока, а не от начала координат:
     // замёрзнуть должно то, что осталось за спиной, а не то, во что он смотрит.
+    this.hands.update(this.sim, this.eye, this.aimDirection, this.character.aabbAt(this.character.position));
     this.sim.focus = this.playerPosition;
     this.sim.step(dt);
     for (const vehicle of this.vehicles.values()) vehicle.afterPhysics();
@@ -633,6 +643,7 @@ export class Heist {
   }
 
   restart(): void {
+    this.hands.drop(this.sim);
     this.shake.reset();
     this.shakeState = { offset: v3(), yaw: 0, pitch: 0, roll: 0 };
     this.mission.restart();

@@ -31,6 +31,8 @@ export enum Mat {
    * держит — зато при разрыве включает сирену.
    */
   Cable = 17,
+  /** Thin sheet / hollow roof profiles: voxel is an envelope, not solid steel. */
+  RoofMetal = 18,
 }
 
 export interface MaterialDef {
@@ -311,6 +313,11 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
     }),
   );
 
+  put(def(Mat.RoofMetal, 'roof_metal', {
+    density: 180, toughness: 0.55, hp: 100, color: [102, 118, 117],
+    metalness: 0.7, roughness: 0.65, maxStress: 180_000_000, maxMoment: 25_000,
+  }));
+
   for (let i = 0; i < table.length; i++) {
     if (!table[i]) throw new Error(`Дыра в таблице материалов: id=${i}`);
   }
@@ -365,6 +372,7 @@ export function materialByColor(r: number, g: number, b: number): MaterialDef {
 }
 
 const EXCLUDED_FROM_PALETTE: ReadonlySet<number> = new Set([
+  Mat.RoofMetal,
   Mat.Air,
   Mat.Foundation,
   Mat.Water,

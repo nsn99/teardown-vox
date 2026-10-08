@@ -344,12 +344,13 @@ function handleActions(h: Heist): void {
         empty: 'Опустите груз краном на платформу и нажмите E', moving: 'Остановите грузовик для работы с грузом' };
       hud.message(messages[result], 2);
     } else {
-      const stowed = h.stow();
+      const stowed = h.hands.body ? null : h.stow();
       if (stowed) {
         hud.message(`В кузов: ${h.vehicles.get(stowed)?.spec.name ?? 'техника'}`, 1.5);
       } else {
         const id = h.interact();
-        if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
+        if (id?.startsWith('body:') || (!id && h.hands.message)) hud.message(h.hands.message, 2);
+        else if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
       }
     }
   }
@@ -431,7 +432,7 @@ function handleActions(h: Heist): void {
     const res = h.use();
     if (res.used) {
       if (res.tool === 'extinguisher' && res.point) {
-        extinguisherJet.show(h.eye, res.point);
+        extinguisherJet.show(h.eye, res.point, res.sprayHitSurface);
         if ((res.doused ?? 0) > 0) extinguisherHitUntil = performance.now() + 800;
         const range = h.inventory.activeStats.range;
         hud.message(
@@ -509,7 +510,8 @@ function frame(now: number): void {
     if (paused) return;
     const vehicle = h.driving;
     touch?.setMode(h.operating ? 'crane' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle ? 'vehicle' : 'foot');
-    touch?.setTool(TOOLS[h.inventory.active].name);
+    touch?.setTool(h.hands.body ? `В руках · ${Math.ceil(h.hands.body.mass())} кг` : TOOLS[h.inventory.active].name);
+    touch?.setCarrying(!!h.hands.body || h.mission.carriedIds.length > 0);
     if (vehicle) touch?.setSpeed(Math.abs(vehicle.speed) * 3.6, vehicle.speedLimit);
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT,

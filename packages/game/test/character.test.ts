@@ -232,3 +232,13 @@ describe('запросы пересечения', () => {
     expect(snap.height).toBeGreaterThan(1.5);
   });
 });
+
+it('не проскакивает тонкую доску даже при большом перемещении за кадр', async () => {
+  const { buildPlank } = await import('@tvox/game');
+  const world = floorWorld();
+  buildPlank(world, v3(-3, 1.2, -1), v3(3, 1.2, -1), 1, 2);
+  const ch = new CharacterController({ position: v3(0, .01, 0) });
+  ch.velocity.z = -300;
+  ch.update(world, IDLE, 0, .1);
+  expect(ch.position.z).toBeGreaterThan(-1);
+});

@@ -189,7 +189,7 @@ export class CharacterController {
     // --- X ---
     if (this.velocity.x !== 0) {
       const next = v3(this.position.x + this.velocity.x * dt, this.position.y, this.position.z);
-      if (overlapsSolid(world, this.aabbAt(next))) {
+      if (overlapsSolid(world, sweptBox(this.aabbAt(this.position), this.aabbAt(next)))) {
         if (!this.tryStepUp(world, next)) this.velocity.x = 0;
       } else {
         this.position = next;
@@ -199,7 +199,7 @@ export class CharacterController {
     // --- Z ---
     if (this.velocity.z !== 0) {
       const next = v3(this.position.x, this.position.y, this.position.z + this.velocity.z * dt);
-      if (overlapsSolid(world, this.aabbAt(next))) {
+      if (overlapsSolid(world, sweptBox(this.aabbAt(this.position), this.aabbAt(next)))) {
         if (!this.tryStepUp(world, next)) this.velocity.z = 0;
       } else {
         this.position = next;
@@ -208,7 +208,7 @@ export class CharacterController {
 
     // --- Y ---
     const nextY = v3(this.position.x, this.position.y + this.velocity.y * dt, this.position.z);
-    if (overlapsSolid(world, this.aabbAt(nextY))) {
+    if (overlapsSolid(world, sweptBox(this.aabbAt(this.position), this.aabbAt(nextY)))) {
       if (this.velocity.y <= 0) {
         this.onGround = true;
         // Прижимаемся к опоре с точностью до сантиметра.
@@ -233,7 +233,10 @@ export class CharacterController {
     const step = this.cfg.stepHeight;
     for (let lift = 0.1; lift <= step + 1e-6; lift += 0.1) {
       const raised = v3(target.x, this.position.y + lift, target.z);
-      if (!overlapsSolid(world, this.aabbAt(raised))) {
+      const aboveStart = v3(this.position.x, raised.y, this.position.z);
+      // A step must have headroom for the whole ascent and the horizontal path.
+      if (!overlapsSolid(world, sweptBox(this.aabbAt(this.position), this.aabbAt(aboveStart))) &&
+          !overlapsSolid(world, sweptBox(this.aabbAt(aboveStart), this.aabbAt(raised)))) {
         // Прижимаемся к ступени: зависание после подъёма сбивало движение
         // на диагональных пандусах, пока игрок снова не касался опоры.
         const lowY = this.position.y;
@@ -348,4 +351,10 @@ function scanAabb(world: VoxelWorld, box: Aabb, accept: (mat: number) => boolean
     }
   }
   return false;
+}
+
+/** Swept axis movement cannot skip a thin board during a long frame. */
+function sweptBox(a: Aabb, b: Aabb): Aabb {
+  return { min: v3(Math.min(a.min.x, b.min.x), Math.min(a.min.y, b.min.y), Math.min(a.min.z, b.min.z)),
+    max: v3(Math.max(a.max.x, b.max.x), Math.max(a.max.y, b.max.y), Math.max(a.max.z, b.max.z)) };
 }

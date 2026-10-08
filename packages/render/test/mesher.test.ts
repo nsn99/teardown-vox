@@ -230,3 +230,15 @@ describe('меш несёт свойства материала', () => {
     expect(lit.quads).toBeLessThan(s.solidVoxels);
   });
 });
+
+it('нагретое стекло темнеет и в основном меше, и в фоновой сборке чанка', async () => {
+  const { sliceChunk, meshSlice } = await import('../src/chunk-view.js');
+  const s=shape(2,2,1); s.fill({},Mat.Glass);
+  const cold=meshShape(s,{pass:'transparent'});
+  s.damage.fill(100);
+  const hot=meshShape(s,{pass:'transparent'});
+  expect(hot.colors[0]).toBeLessThan(cold.colors[0]*.4);
+  const region={x0:0,y0:0,z0:0,x1:2,y1:2,z1:1};
+  const worker=meshSlice(sliceChunk(s,region,undefined),.22).transparent;
+  expect(worker.colors[0]).toBeLessThan(cold.colors[0]*.4);
+});

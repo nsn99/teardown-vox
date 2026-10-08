@@ -50,7 +50,7 @@ export class SessionCheckpoint {
             structural: s.structural, paint, attachments: [...s.attachments], anchors: [...s.attachmentAnchors] };
         }),
       })),
-      heist: h.snapshot(), triggers: h.triggers.snapshot(), mission: h.mission.snapshot(), inventory: h.inventory.snapshot(), character: h.character.state,
+      hand: h.hands.snapshot(), heist: h.snapshot(), triggers: h.triggers.snapshot(), mission: h.mission.snapshot(), inventory: h.inventory.snapshot(), character: h.character.state,
       yaw: h.yaw, pitch: h.pitch, drivingId: h.drivingId, operatingId: h.operatingId, time: h.sim.world.time,
       vehicles: [...h.vehicles].map(([id, v]) => ({ id, state: v.snapshot(), deck: v.deck?.snapshot() })),
       cranes: [...h.cranes].map(([id, c]) => ({ id, state: c.snapshot() })),
@@ -104,6 +104,7 @@ export class SessionCheckpoint {
       }
     }
     h.sim.world.reindex();
+    h.hands.restore(saved.hand, bodies);
     h.restore(saved.heist); h.triggers.restore(saved.triggers); h.mission.restore(saved.mission); h.inventory.restore(saved.inventory);
     h.character.teleport(saved.character.position); h.character.velocity = { ...saved.character.velocity };
     h.character.onGround = saved.character.onGround; h.character.inWater = saved.character.inWater;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Mat, boxesToColliders, buildColliders, decomposeToBoxes } from '@tvox/core';
+import { Mat, decomposeCoarse, boxesToColliders, buildColliders, decomposeToBoxes } from '@tvox/core';
 import { VS, makeShape } from './helpers.js';
 
 const volumeOf = (b: { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number }) =>
@@ -98,4 +98,14 @@ describe('перевод боксов в коллайдеры', () => {
     expect(c.cy).toBeCloseTo(2.5 * VS, 9);
     expect(c.cz).toBeCloseTo(3.5 * VS, 9);
   });
+});
+
+it('грубый коллайдер не выступает над площадкой и за неполный край чанка', () => {
+  const s=makeShape(7,30,5);s.fill({},Mat.Concrete);
+  const boxes=decomposeCoarse(s,4);
+  expect(Math.max(...boxes.map(b=>b.cy+b.hy))).toBeCloseTo(3,6);
+  expect(Math.max(...boxes.map(b=>b.cx+b.hx))).toBeCloseTo(.7,6);
+  const cut=decomposeCoarse(s,4,{region:{x0:1,y0:3,z0:1,x1:6,y1:29,z1:4}});
+  expect(Math.min(...cut.map(b=>b.cy-b.hy))).toBeCloseTo(.3,6);
+  expect(Math.max(...cut.map(b=>b.cy+b.hy))).toBeCloseTo(2.9,6);
 });

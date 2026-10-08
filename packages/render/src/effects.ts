@@ -307,47 +307,72 @@ export class FireLights {
   }
 }
 
-/** Одна переиспользуемая струя: видна дальность и точка попадания пены. */
+/** Bounded pool of white foam bubbles: travelling spray and a short-lived frothy splash. */
 export class ExtinguisherJet {
-  readonly mesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.025, 1, 8, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xe4faff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+  readonly mesh = new THREE.InstancedMesh(
+    new THREE.IcosahedronGeometry(1, 1),
+    new THREE.MeshLambertMaterial({ color: 0xf5fffa }),
+    192,
   );
-  private remaining = 0;
-  private axis = new THREE.Vector3(0, 1, 0);
-  private direction = new THREE.Vector3();
-  private start = new THREE.Vector3();
-  private end = new THREE.Vector3();
+  private bubbles: Array<{ start: THREE.Vector3; end: THREE.Vector3; age: number; travel: number;
+    side: THREE.Vector3; up: THREE.Vector3; phase: number; size: number; hit: boolean }> = [];
+  private pose = new THREE.Object3D();
+  private serial = 0;
 
   constructor() {
-    this.mesh.name = 'extinguisher-jet';
+    this.mesh.name = 'extinguisher-foam';
     this.mesh.visible = false;
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   }
 
-  show(origin: Vec3, point: Vec3): void {
-    this.end.set(point.x, point.y, point.z);
-    this.start.set(origin.x, origin.y, origin.z);
-    this.direction.subVectors(this.end, this.start).normalize();
-    // Сопло чуть ниже глаз, чтобы струя читалась в перспективе.
-    this.start.addScaledVector(this.direction, 0.25);
-    this.start.y -= 0.18;
-    this.direction.subVectors(this.end, this.start);
-    const length = this.direction.length();
-    if (length < 0.01) { this.clear(); return; }
-    this.mesh.position.copy(this.start).add(this.end).multiplyScalar(0.5);
-    this.mesh.quaternion.setFromUnitVectors(this.axis, this.direction.normalize());
-    this.mesh.scale.set(1, length, 1);
+  show(origin: Vec3, point: Vec3, hitSurface = true): void {
+    const end = new THREE.Vector3(point.x, point.y, point.z);
+    const start = new THREE.Vector3(origin.x, origin.y - 0.18, origin.z);
+    const direction = end.clone().sub(start).normalize();
+    start.addScaledVector(direction, Math.min(0.4, start.distanceTo(end) * 0.3));
+    const length = start.distanceTo(end);
+    if (length < 0.01) return;
+    const side = new THREE.Vector3().crossVectors(direction,
+      Math.abs(direction.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(side, direction).normalize();
+    for (let i = 0; i < 8; i++) {
+      if (this.bubbles.length >= 192) this.bubbles.shift();
+      const serial = this.serial++;
+      this.bubbles.push({ start, end, side, up, age: -i * 0.005,
+        travel: length / 12, phase: serial * 2.399963, size: 0.035 + (serial % 5) * 0.008, hit: hitSurface });
+    }
     this.mesh.visible = true;
-    this.remaining = 0.12;
   }
 
   step(dt: number): void {
-    this.remaining -= dt;
-    if (this.remaining <= 0) this.clear();
+    let count = 0;
+    this.bubbles = this.bubbles.filter(b => {
+      b.age += dt;
+      return b.age < b.travel + (b.hit ? 0.65 : 0.08);
+    });
+    for (const b of this.bubbles) {
+      if (b.age < 0) continue;
+      const progress = Math.min(1, b.age / b.travel);
+      const foamAge = Math.max(0, b.age - b.travel);
+      const spread = 0.018 + progress * progress * 0.16;
+      this.pose.position.copy(b.start).lerp(b.end, progress)
+        .addScaledVector(b.side, Math.cos(b.phase) * spread)
+        .addScaledVector(b.up, Math.sin(b.phase) * spread);
+      const size = b.size * (1 + progress * 1.4) * Math.max(0, 1 - foamAge / 0.65);
+      this.pose.scale.setScalar(size);
+      this.pose.updateMatrix();
+      this.mesh.setMatrixAt(count++, this.pose.matrix);
+    }
+    this.mesh.count = count;
+    this.mesh.visible = count > 0;
+    this.mesh.instanceMatrix.needsUpdate = true;
   }
 
   clear(): void {
-    this.remaining = 0;
+    this.bubbles.length = 0;
+    this.mesh.count = 0;
     this.mesh.visible = false;
   }
 }

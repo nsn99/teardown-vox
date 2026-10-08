@@ -192,7 +192,8 @@ export function meshShape(shape: MeshSource, opts: MeshOptions = {}): MeshData {
       : MATERIALS[mat].color;
     const wear = (mat === Mat.Metal || mat === Mat.Plastic)
       ? Math.min(1, (shape.damage?.[i] ?? 0) / MATERIALS[mat].hp) : 0;
-    const shade = (1 - aoStrength * (1 - ao / 3)) * (1 - wear * 0.25);
+    const heatShade = mat === Mat.Glass ? 1 - Math.min(1, (shape.damage?.[i] ?? 0) / 120) * 0.85 : 1;
+    const shade = (1 - aoStrength * (1 - ao / 3)) * (1 - wear * 0.25) * heatShade;
     rgb[0] = (base[0] / 255) * shade;
     rgb[1] = (base[1] / 255) * shade;
     rgb[2] = (base[2] / 255) * shade;

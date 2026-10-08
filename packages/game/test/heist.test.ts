@@ -96,7 +96,6 @@ describe('карта M: порт', () => {
       'fence-west',
       'fence-east',
       'vehicle-garage',
-      'boat-shelter',
     ]);
     expect(level.solidVoxels).toBeGreaterThan(100_000);
   });

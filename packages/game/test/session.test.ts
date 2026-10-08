@@ -85,3 +85,16 @@ describe('сохранение сессии', () => {
     expect(h.sim.world.totalSolidVoxels()).toBe(count);
   });
 });
+
+it('сохраняет предмет в руках и позволяет отпустить его после загрузки', () => {
+  const {h,checkpoint}=scene();
+  h.character.teleport(v3(45,0,37)); h.yaw=0; h.pitch=0;
+  const s=new VoxelShape({sx:3,sy:3,sz:3});s.fill({},Mat.Wood);
+  const b=new Body({name:'hand-test',kind:'dynamic',shapes:[s]});
+  b.transform.position=v3(44.85,h.eye.y-.15,35.8);h.sim.world.addBody(b);
+  expect(h.interact()).toBe(`body:${b.id}`); expect(h.hands.body).toBe(b);
+  const save=checkpoint.capture();const {h:other,checkpoint:loader}=scene();loader.restore(save);
+  expect(other.hands.body?.name).toBe('hand-test');expect(other.hands.body?.id).not.toBe(b.id);
+  const held=other.hands.body!;expect(other.interact()).toBe(`body:${held.id}`);
+  expect(held.kinematic).toBe(false);expect(other.hands.body).toBeNull();
+});
