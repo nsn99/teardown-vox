@@ -6,12 +6,13 @@ import { ColliderBox, buildColliders, decomposeCoarse } from './collider.js';
 import { VoxelRegion } from './voxel-shape.js';
 import { PhysicsBackend } from './physics.js';
 import { carve } from './destruction.js';
+import { impactDamage } from './impact-damage.js';
 
 export interface RapierPhysicsOptions {
   /**
-   * Форма крупнее этого числа вокселей коллайдируется огрублённо.
-   * Точные коллайдеры для всего уровня — это сотни тысяч боксов и
-   * мгновенная смерть солвера.
+   * Неподвижная форма крупнее этого числа коллайдируется огрублённо.
+   * Подвижные формы всегда точные: воздух вокруг тонкого обломка
+   * не должен становиться опорой. Жадная склейка ограничивает число боксов.
    */
   coarseAbove?: number;
   /** Во сколько раз огрублять крупные формы. */
@@ -146,9 +147,14 @@ export class RapierPhysics implements PhysicsBackend {
       // держать его же обломок в воздухе. Резкое уменьшение формы требует
       // немедленной синхронизации; обычные удары остаются в очереди.
       const refitted = this.refitDetachedShapes(existing);
+      if (body.collidersImmediate) {
+        this.rebuildDirtyChunks(existing, Infinity);
+        body.collidersImmediate = false;
+        body.collidersDirty = false;
+      }
       if (refitted && this.dirtyChunkCount(body) === 0) {
         body.collidersDirty = false;
-      } else if (!this.pendingIds.has(body.id)) {
+      } else if (body.collidersDirty && !this.pendingIds.has(body.id)) {
         this.pending.push(body);
         this.pendingIds.add(body.id);
       }
@@ -157,7 +163,7 @@ export class RapierPhysics implements PhysicsBackend {
       ? this.RAPIER.RigidBodyType.KinematicPositionBased : this.RAPIER.RigidBodyType.Dynamic;
     if (existing.rb.bodyType() !== type) {
       existing.rb.setBodyType(type, true);
-      if (body.tags.has('vehicle')) existing.rb.enableCcd(!body.kinematic);
+      existing.rb.enableCcd(type === this.RAPIER.RigidBodyType.Dynamic);
       if (body.kind === 'dynamic' && !body.kinematic) {
         existing.rb.setLinvel(body.velocity, true);
         existing.rb.setAngvel(body.angularVelocity, true);
@@ -199,7 +205,7 @@ export class RapierPhysics implements PhysicsBackend {
     );
     desc.setRotation(body.transform.rotation);
     const rb = this.rapierWorld.createRigidBody(desc);
-    if (body.tags.has('vehicle')) rb.enableCcd(true);
+    if (body.kind === 'dynamic') rb.enableCcd(true);
     (rb as unknown as { userData: number }).userData = body.id;
 
     const entry: Entry = {
@@ -221,11 +227,12 @@ export class RapierPhysics implements PhysicsBackend {
     body.physicsHandle = rb.handle;
     body.velocityDirty = false;
     body.collidersDirty = false;
+    body.collidersImmediate = false;
   }
 
   /** Полная пересборка: все чанки всех форм тела. */
   private buildColliders(entry: Entry): void {
-    for (const c of entry.colliders) this.rapierWorld.removeCollider(c, false);
+    for (const c of entry.colliders) this.rapierWorld.removeCollider(c, true);
     entry.colliders.length = 0;
     entry.chunkColliders.clear();
 
@@ -264,7 +271,7 @@ export class RapierPhysics implements PhysicsBackend {
     const old = entry.chunkColliders.get(key);
     if (!old) return;
     for (const c of old) {
-      this.rapierWorld.removeCollider(c, false);
+      this.rapierWorld.removeCollider(c, true);
       const i = entry.colliders.indexOf(c);
       if (i >= 0) entry.colliders.splice(i, 1);
     }
@@ -285,7 +292,7 @@ export class RapierPhysics implements PhysicsBackend {
     if (shape.solidInChunk(chunk) === 0) return 0;
 
     const region = shape.chunkBounds(chunk);
-    const boxes = this.boxesFor(shape, region);
+    const boxes = this.boxesFor(shape, region, entry.body.kind === 'dynamic');
     if (boxes.length === 0) return 0;
 
     const density = cachedDensity(shape);
@@ -338,9 +345,9 @@ export class RapierPhysics implements PhysicsBackend {
     return n;
   }
 
-  private boxesFor(shape: VoxelShape, region?: VoxelRegion): ColliderBox[] {
+  private boxesFor(shape: VoxelShape, region?: VoxelRegion, precise = false): ColliderBox[] {
     const opts = { maxBoxes: this.cfg.maxBoxesPerShape, region };
-    return shape.solidVoxels > this.cfg.coarseAbove
+    return !precise && shape.solidVoxels > this.cfg.coarseAbove
       ? decomposeCoarse(shape, this.cfg.coarseFactor, opts)
       : buildColliders(shape, opts);
   }
@@ -520,9 +527,8 @@ export class RapierPhysics implements PhysicsBackend {
       // полом не запускает сферическое вырезание карты под колёсами.
       if (a?.tags.has('vehicle') || b?.tags.has('vehicle') || body.tags.has('vehicle-chip')) return;
 
-      const over = impulse - this.cfg.impactThreshold;
-      const radius = Math.min(2.5, 0.15 + over * this.cfg.impactDamageScale);
-      const power = Math.min(1.1, 0.25 + over * 3e-4);
+      const contactShare = Math.min(1, impulse / Math.max(1e-3, bodyImpulse));
+      const { radius, power } = impactDamage(body, speedDrop * Math.sqrt(contactShare), this.cfg.impactDamageScale);
       carve(
         this.world,
         { kind: 'sphere', center: point, radius },
@@ -530,7 +536,8 @@ export class RapierPhysics implements PhysicsBackend {
           power,
           damage: 0,
           instant: true,
-          falloff: 'quadratic',
+          // Контакт распределяет давление по пятну удара; размер пятна уже ограничен энергией.
+          falloff: 'none',
           cause: 'impact',
           protect: this.cfg.protectedMaterials,
         },

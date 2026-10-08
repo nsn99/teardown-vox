@@ -16,3 +16,5 @@ export * from './physics.js';
 export * from './debris.js';
 export * from './physics-rapier.js';
 export * from './simulation.js';
+export * from './solid-contact.js';
+export * from './impact-damage.js';

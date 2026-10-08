@@ -67,7 +67,7 @@ export interface SpawnPoint {
   yaw: number;
 }
 
-export type Daylight = 'day' | 'dusk' | 'night';
+export type Daylight = 'day' | 'golden' | 'dusk' | 'night';
 
 /**
  * Источник света уровня: прожектор на кране, лампа над воротами.

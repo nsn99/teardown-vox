@@ -130,6 +130,8 @@ export class VoxelShape {
   readonly dirtyMeshChunks = new Set<number>();
   readonly dirtyStructureChunks = new Set<number>();
   readonly dirtyColliderChunks = new Set<number>();
+  /** Версия материала/геометрии; не сбрасывается потребителями грязных чанков. */
+  revision = 0;
 
   /** Размер сетки чанков. */
   readonly chunksX: number;
@@ -317,6 +319,7 @@ export class VoxelShape {
   }
 
   private touch(index: number, x: number, y: number, z: number): void {
+    this.revision++;
     regionExpand(this.dirtyMesh, x, y, z);
     regionExpand(this.dirtyStructure, x, y, z);
     const chunk = this.chunkIndexAt(x, y, z);

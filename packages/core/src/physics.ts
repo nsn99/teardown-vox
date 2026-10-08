@@ -2,6 +2,7 @@ import { Aabb, Vec3, add, distance, length, normalize, scale, sub, v3 } from './
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 import { carve } from './destruction.js';
+import { impactDamage } from './impact-damage.js';
 
 export interface PhysicsBackend {
   /** Солвер интегрирует вращение и реальные контакты свободных тел. */
@@ -189,9 +190,7 @@ export class SimplePhysics implements PhysicsBackend {
   ): void {
     // Падение автомобиля — контакт шасси с покрытием, а не взрыв грунта.
     if (body.tags.has('vehicle') || other?.tags.has('vehicle') || body.tags.has('vehicle-chip')) return;
-    const over = impulse - this.cfg.impactThreshold;
-    const radius = Math.min(2.5, 0.15 + over * this.cfg.impactDamageScale);
-    const power = Math.min(1.1, 0.25 + over * 3e-4);
+    const { radius, power } = impactDamage(body, impulse / Math.max(1e-3, body.mass()), this.cfg.impactDamageScale);
     if (body.tags.has('debris')) {
       body.fractureOnImpact = true;
       body.fracturePoint = { ...point };
@@ -217,7 +216,8 @@ export class SimplePhysics implements PhysicsBackend {
         power,
         damage: 0,
         instant: true,
-        falloff: 'quadratic',
+        // Контакт распределяет давление по пятну удара; размер пятна уже ограничен энергией.
+        falloff: 'none',
         cause: 'impact',
         protect: this.cfg.protectedMaterials,
       },
@@ -252,6 +252,7 @@ export class SimplePhysics implements PhysicsBackend {
     const probe = Math.min(2, 0.12 + fall);
     const ignore = new Set<number>([body.id]);
     let best: { y: number; body: Body; point: Vec3 } | null = null;
+    let contacts = 0;
 
     for (let ix = 0; ix < PROBE_GRID; ix++) {
       for (let iz = 0; iz < PROBE_GRID; iz++) {
@@ -267,9 +268,16 @@ export class SimplePhysics implements PhysicsBackend {
         });
         if (!hit) continue;
         const y = origin.y - hit.distance;
-        if (!best || y > best.y) best = { y, body: hit.body, point: hit.point };
+        if (!best || y > best.y + 1e-6) {
+          best = { y, body: hit.body, point: { ...hit.point } }; contacts = 1;
+        } else if (Math.abs(y - best.y) <= 1e-6 && hit.body === best.body) {
+          best.point = add(best.point, hit.point); contacts++;
+        }
       }
     }
+    // Плита касается перекрытия всей нижней гранью: энергия прикладывается
+    // в центре контактов, а не только в первом углу сетки проб.
+    if (best) best.point = scale(best.point, 1 / contacts);
     return best;
   }
 

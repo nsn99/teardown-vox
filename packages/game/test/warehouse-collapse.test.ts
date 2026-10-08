@@ -36,7 +36,9 @@ describe('падение склада после удаления всех оп�
       const before = shell.solidVoxels;
       const roofBefore = highRoof([shell]);
       const far = { min: v3(50, 0.1, 50), max: v3(51, 2, 51) };
-      for (let i = 0; i < 240; i++) {
+      // Скатная крыша выше прежнего перекрытия: наблюдаем весь обвал,
+      // включая падение её частей после первого удара оболочки о землю.
+      for (let i = 0; i < 420; i++) {
         for (const gate of gates) gate.update(far, 1 / 60);
         sim.step(1 / 60);
       }
