@@ -10,6 +10,7 @@ import {
   Profile,
   MAX_TIER,
   TOOL_IDS,
+  TOOLS,
   ToolId,
   VehicleInput,
   portLevel,
@@ -101,9 +102,23 @@ menu.render(profile, level.brief);
 menu.show();
 resize();
 window.addEventListener('resize', resize);
+if (mobile && window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
+}
 
 function resize(): void {
-  renderer.resize(window.innerWidth, window.innerHeight);
+  const viewport = mobile ? window.visualViewport : null;
+  const width = viewport?.width ?? window.innerWidth;
+  const height = viewport?.height ?? window.innerHeight;
+  if (mobile) {
+    const style = document.documentElement.style;
+    style.setProperty('--play-width', `${width}px`);
+    style.setProperty('--play-height', `${height}px`);
+    style.setProperty('--play-left', `${viewport?.offsetLeft ?? 0}px`);
+    style.setProperty('--play-top', `${viewport?.offsetTop ?? 0}px`);
+  }
+  renderer.resize(width, height);
 }
 
 function loadProfile(): Profile {
@@ -444,6 +459,7 @@ function frame(now: number): void {
     if (paused) return;
     const vehicle = h.driving;
     touch?.setMode(h.operating ? 'crane' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle ? 'vehicle' : 'foot');
+    touch?.setTool(TOOLS[h.inventory.active].name);
     const move = input.sample();
     h.update(dt, move, h.driving ? readVehicleInput() : NEUTRAL_INPUT,
       h.operating ? { slew: move.right, luff: move.forward, hoist: Number(move.jump) - Number(move.crouch) } : NEUTRAL_CRANE_INPUT);

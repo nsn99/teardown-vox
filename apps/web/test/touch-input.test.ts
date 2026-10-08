@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Input } from '../src/input.js';
-import { prefersTouch, stickAxes } from '../src/touch-controls.js';
+import { prefersTouch, stickAxes, stickSprint, touchLookDelta, TouchControls } from '../src/touch-controls.js';
 
 // Native EventTargets exercise the actual input listeners without a renderer.
 let input: Input;
@@ -15,6 +15,35 @@ beforeEach(() => {
 afterEach(() => { input.dispose(); vi.unstubAllGlobals(); });
 
 describe('phone input', () => {
+  it('runs only at full forward deflection on foot, never in the crane', () => {
+    expect(stickSprint('foot', 1)).toBe(true);
+    expect(stickSprint('foot', 0.8)).toBe(false);
+    expect(stickSprint('foot', -1)).toBe(false);
+    expect(stickSprint('crane', 1)).toBe(false);
+    expect(stickSprint('blade', 1)).toBe(false);
+  });
+  it('uses the same modest sensitivity for aiming and tool-button dragging', () => {
+    expect(touchLookDelta(100, -50)).toEqual({ yaw: -0.3, pitch: 0.15 });
+  });
+  it('aims with the action finger without releasing fire or the walking finger', () => {
+    input.requestLock();
+    input.setTouchMove(1, 0);
+    input.setTouchKey('Mouse0', true);
+    // Exercise actual gesture handlers; the element only needs capture cleanup.
+    const element = { classList: { remove: vi.fn() }, hasPointerCapture: () => false };
+    const pointer = { element, kind: 'key', code: 'Mouse0', x: 100, y: 100 };
+    const controls = Object.assign(Object.create(TouchControls.prototype), {
+      input, pointers: new Map([[5, pointer]]),
+    }) as { move(e: PointerEvent): void; end(id: number): void };
+    controls.move({ pointerId: 5, clientX: 120, clientY: 90, preventDefault() {} } as PointerEvent);
+    expect(input.state.firing).toBe(true);
+    expect(input.consumeLook()).toEqual({ yaw: -0.06, pitch: 0.03 });
+    controls.end(99);
+    expect(input.state.firing).toBe(true);
+    controls.end(5);
+    expect(input.state.firing).toBe(false);
+    expect(input.sample().forward).toBe(1);
+  });
   it('starts and pauses without Pointer Lock support', () => {
     expect(input.active).toBe(false);
     input.requestLock();
