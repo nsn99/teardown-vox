@@ -2,7 +2,7 @@ import { Aabb, Vec3, add, distance, length, normalize, scale, sub, v3 } from './
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 import { carve } from './destruction.js';
-import { impactDamage } from './impact-damage.js';
+import { impactContact, impactDamage } from './impact-damage.js';
 
 export interface PhysicsBackend {
   /** Солвер интегрирует вращение и реальные контакты свободных тел. */
@@ -219,6 +219,7 @@ export class SimplePhysics implements PhysicsBackend {
         // Контакт распределяет давление по пятну удара; размер пятна уже ограничен энергией.
         falloff: 'none',
         cause: 'impact',
+          filterVoxel: impactContact(body, impulse / Math.max(1e-3, body.mass()), point, other),
         protect: this.cfg.protectedMaterials,
       },
     );

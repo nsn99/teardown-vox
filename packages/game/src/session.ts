@@ -52,7 +52,7 @@ export class SessionCheckpoint {
       })),
       hand: h.hands.snapshot(), heist: h.snapshot(), triggers: h.triggers.snapshot(), mission: h.mission.snapshot(), inventory: h.inventory.snapshot(), character: h.character.state,
       yaw: h.yaw, pitch: h.pitch, drivingId: h.drivingId, operatingId: h.operatingId, time: h.sim.world.time,
-      vehicles: [...h.vehicles].map(([id, v]) => ({ id, state: v.snapshot(), deck: v.deck?.snapshot() })),
+      vehicles: [...h.vehicles].map(([id, v]) => ({ id, state: v.snapshot(), deck: v.deck?.snapshot(), forklift: v.forklift?.snapshot() })),
       cranes: [...h.cranes].map(([id, c]) => ({ id, state: c.snapshot() })),
       gates: h.gates.map(g => g.snapshot()), charges: h.charges.list(), destruction: h.sim.destruction.snapshot(),
       fire: h.sim.fire.snapshot(), smoke: h.sim.smoke.snapshot(),
@@ -112,7 +112,7 @@ export class SessionCheckpoint {
     h.yaw = saved.yaw; h.pitch = saved.pitch; h.drivingId = saved.drivingId; h.operatingId = saved.operatingId;
     h.sim.world.time = saved.time;
     for (const r of saved.vehicles) { const v = h.vehicles.get(r.id); if (!v) continue;
-      v.restore(r.state); if (r.deck) v.deck?.restore(r.deck, bodies); }
+      v.restore(r.state); if (r.forklift) v.forklift?.restore(r.forklift, bodies); if (r.deck) v.deck?.restore(r.deck, bodies); }
     for (const r of saved.cranes) h.cranes.get(r.id)?.restore(r.state, bodies);
     saved.gates.forEach((r, i) => h.gates[i]?.restore(r));
     h.sim.destruction.restore(saved.destruction, new Map([...bodies].map(([old, body]) => [old, body.id])));

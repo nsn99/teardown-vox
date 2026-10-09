@@ -30,12 +30,13 @@ function run(v: Vehicle, sim: Simulation, input: VehicleInput, seconds: number):
 }
 
 describe('каталог техники', () => {
-  it('шесть видов техники, включая грузовик', () => {
+  it('семь видов техники, включая погрузчик', () => {
     expect(Object.keys(VEHICLES).sort()).toEqual([
       'boat',
       'bulldozer',
       'car',
       'excavator',
+      'forklift',
       'pickup',
       'truck',
     ]);
@@ -124,7 +125,7 @@ describe('среда обитания', () => {
 });
 
 describe('взаимодействие с вокселями', () => {
-  it('кирпичная стена останавливает пикап даже с разгоном', () => {
+  it('пикап повреждает кирпич при разгоне, но толстая стена его останавливает', () => {
     const sim = emptySim();
     // Стену ставим с разбегом: чтобы таранить, надо успеть разогнаться.
     const wall = addWall(sim, -25, Mat.Brick);
@@ -132,7 +133,8 @@ describe('взаимодействие с вокселями', () => {
     const v = new Vehicle('pickup', { position: v3(0, 0.1, 0) });
     v.spawn(sim);
     run(v, sim, drive({ throttle: 1 }), 4);
-    expect(wall.solidVoxels).toBe(before);
+    expect(wall.solidVoxels).toBeLessThan(before);
+    expect(wall.solidVoxels).toBeGreaterThan(before * .8);
     expect(v.position.z).toBeGreaterThan(-25);
     expect(v.hullIntegrity).toBeLessThan(1);
   });
@@ -172,7 +174,7 @@ describe('взаимодействие с вокселями', () => {
     const before = wall.solidVoxels;
     const v = new Vehicle('pickup', { position: v3(0, 0.1, 0) });
     v.spawn(sim);
-    run(v, sim, drive({ throttle: 1 }), 4);
+    run(v, sim, drive({ throttle: .1 }), 4);
     expect(wall.solidVoxels).toBe(before);
     expect(v.position.z).toBeGreaterThan(-4);
   });
@@ -363,7 +365,7 @@ describe('силуэт техники', () => {
     expect(new Set(colors).size).toBe(3);
     expect(colors.every(c => c >= 0x1000000)).toBe(true);
     expect(shape.paint.has(shape.idx(24, 18, 17))).toBe(false);
-    expect([...shape.data].every(m => m === Mat.Air || m === Mat.HeavyMetal || m === Mat.Glass)).toBe(true);
+    expect([...shape.data].every(m => m === Mat.Air || m === Mat.HeavyMetal || m === Mat.Glass || m === Mat.Fuel)).toBe(true);
   });
 
   it('корпус не заполняет верхние углы габаритного бокса', () => {

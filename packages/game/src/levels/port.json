@@ -1412,11 +1412,11 @@
         {"op": "fill", "box": [124, 14, 157, 128, 77, 160], "mat": "brick", "color": "#b2aa91"},
         {"op": "fill", "box": [196, 14, 157, 200, 77, 160], "mat": "brick", "color": "#b2aa91"},
         {"op": "fill", "box": [0, 76, 157, 200, 78, 160], "mat": "brick", "color": "#e1dac6"},
-        {"op": "fill", "box": [196, 0, 60, 200, 42, 100], "mat": "air"},
-        {"op": "fill", "box": [180, 0, 56, 200, 46, 60], "mat": "heavy_metal", "color": "#405652"},
-        {"op": "fill", "box": [180, 0, 100, 200, 46, 104], "mat": "heavy_metal", "color": "#405652"},
-        {"op": "fill", "box": [180, 42, 56, 200, 46, 104], "mat": "heavy_metal", "color": "#405652"},
-        {"op": "fill", "box": [185, 0, 60, 200, 3, 100], "mat": "air"},
+        {"op": "fill", "box": [0, 0, 60, 4, 42, 100], "mat": "air"},
+        {"op": "fill", "box": [0, 0, 56, 20, 46, 60], "mat": "heavy_metal", "color": "#405652"},
+        {"op": "fill", "box": [0, 0, 100, 20, 46, 104], "mat": "heavy_metal", "color": "#405652"},
+        {"op": "fill", "box": [0, 42, 56, 20, 46, 104], "mat": "heavy_metal", "color": "#405652"},
+        {"op": "fill", "box": [0, 0, 60, 15, 3, 100], "mat": "air"},
         {"op": "fill", "box": [199, 60, 30, 200, 80, 130], "mat": "brick", "color": "#344d49"},
         {"op": "fill", "box": [199, 61, 31, 200, 79, 129], "mat": "brick", "color": "#e4dcc2"},
         {"op": "fill", "box": [199, 76, 102, 200, 77, 103], "mat": "brick", "color": "#344d49"},
@@ -2293,7 +2293,7 @@
       "size": [
         140,
         22,
-        90
+        102
       ],
       "position": [
         4,
@@ -2331,7 +2331,31 @@
             0,
             140,
             22,
-            90
+            94
+          ],
+          "mat": "plank"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            18,
+            94,
+            140,
+            21,
+            98
+          ],
+          "mat": "plank"
+        },
+        {
+          "op": "fill",
+          "box": [
+            0,
+            18,
+            98,
+            140,
+            20,
+            102
           ],
           "mat": "plank"
         },
@@ -2343,7 +2367,7 @@
             55,
             140,
             22,
-            90
+            102
           ],
           "mat": "air"
         }
@@ -3048,7 +3072,7 @@
         "position": [
           14,
           0,
-          13.6
+          13.2
         ],
         "grounded": false,
         "structural": false,
@@ -3629,6 +3653,9 @@
         ]
       }
     },
+    {"name": "Деревянный ящик в складе", "kind": "dynamic", "tags": ["cargo"], "volume": {"name": "Деревянный ящик в складе", "position": [22.5, 0.31, 27], "size": [12, 12, 12], "grounded": false, "ops": [{"op": "hollow", "wall": "wood", "floor": "wood", "roof": "wood", "thickness": 1}]}},
+    {"name": "Ящик у стеллажа", "kind": "dynamic", "tags": ["cargo"], "volume": {"name": "Ящик у стеллажа", "position": [20.8, 0.31, 27], "size": [12, 12, 12], "grounded": false, "ops": [{"op": "hollow", "wall": "wood", "floor": "wood", "roof": "wood", "thickness": 1}]}},
+    {"name": "Стол в офисе", "kind": "dynamic", "tags": ["cargo"], "volume": {"name": "office-desk", "position": [36, 0.31, 20.5], "size": [16, 10, 8], "grounded": false, "ops": [{"op": "grid", "box": [0, 0, 0, 16, 7, 8], "cell": [1, 7, 1], "step": [15, 100, 7], "mat": "wood"}, {"op": "fill", "box": [0, 7, 0, 16, 8, 8], "mat": "wood"}, {"op": "fill", "box": [5, 8, 2, 11, 10, 6], "mat": "plastic"}]}},
     {
       "name": "warehouse-gable-gate",
       "kind": "dynamic",
@@ -3644,7 +3671,7 @@
           40
         ],
         "position": [
-          26.1,
+          5.6,
           0,
           20
         ],
@@ -3710,6 +3737,7 @@
     }
   ],
   "vehicles": [
+    {"id": "forklift", "kind": "forklift", "position": [54.8, 0.1, 46.5], "yaw": 0},
     {
       "id": "van",
       "kind": "pickup",
@@ -3734,9 +3762,9 @@
       "id": "boat",
       "kind": "boat",
       "position": [
-        12,
+        9,
         -0.4,
-        -1.6
+        -0.75
       ],
       "yaw": 1.5707963267948966
     },
@@ -4149,6 +4177,8 @@
     {
       "id": "warehouse-entry",
       "body": "warehouse-gate",
+      "manual": true,
+      "axis": "x",
       "rise": 4.1,
       "speed": 4,
       "approachRadius": 8,
@@ -4165,6 +4195,8 @@
     {
       "id": "warehouse-gable-entry",
       "body": "warehouse-gable-gate",
+      "manual": true,
+      "axis": "z",
       "rise": 4.3,
       "speed": 4,
       "approachRadius": 5,
@@ -4172,7 +4204,7 @@
       "support": {
         "volume": "warehouse",
         "voxel": [
-          198,
+          2,
           44,
           80
         ]
@@ -4185,6 +4217,8 @@
       "name": "Портовый кран",
       "base": {
         "volume": "crane",
+        "legBottom": 22,
+        "legRadius": 4,
         "anchors": [
           [
             16,

@@ -54,6 +54,8 @@ export interface HeatedCell {
 
 /** Игровая модель теплообмена, не расчёт температуры реального изделия. */
 function thermalTime(mat: number): number {
+  if (mat === Mat.Fuel) return .4;
+  if (mat === Mat.Rubber) return 1.2;
   if (mat === Mat.Plastic || mat === Mat.Foliage) return 0.8;
   if (mat === Mat.Wood || mat === Mat.Plank || mat === Mat.Charred) return 1.5;
   if (mat === Mat.Glass) return 3;
@@ -205,14 +207,14 @@ export class FireSystem {
     cell.temperature += (1100 - cell.temperature) * (1 - Math.exp(-power * dt / thermalTime(mat)));
     result.heated = 1;
     const c = shape.coords(index);
-    if (def.flammability > 0 && cell.temperature >= (mat === Mat.Foliage ? 150 : 280) &&
+    if (def.flammability > 0 && cell.temperature >= (mat === Mat.Foliage || mat === Mat.Fuel ? 150 : 280) &&
       this.ignite(body, shape, index)) {
       result.ignited = 1;
       world.events.emit('fire:ignited', { body, shape, index,
         point: shape.voxelCenterWorld(c.x, c.y, c.z, body.transform) });
     }
     // Пластик размягчается раньше воспламенения, стекло разрушается постепенно.
-    let remove = mat === Mat.Plastic && cell.temperature >= 230;
+    let remove = mat === Mat.Plastic && cell.temperature >= 460;
     if (mat === Mat.Glass) {
       cell.glassDamage = Math.max(cell.glassDamage, shape.damage[index]);
       cell.glassDamage += dt * Math.max(0, cell.temperature - 250) * 0.15;
@@ -235,6 +237,12 @@ export class FireSystem {
       world.events.emit('fire:burnedOut', { body, shape, index });
     } else this.tintHeat(sf, index, cell);
     return result;
+  }
+
+  burningOn(body: Body): number {
+    let count = 0;
+    for (const shape of body.shapes) count += this.shapes.get(shape.id)?.cells.size ?? 0;
+    return count;
   }
 
   temperature(shape: VoxelShape, index: number): number {

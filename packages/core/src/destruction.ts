@@ -411,7 +411,6 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             const mat = shape.data[i];
             if (mat === Mat.Air) continue;
             if (opts.protect?.has(mat)) continue;
-            if (opts.filterVoxel && !opts.filterVoxel(shape, body, x, y, z)) continue;
             const def = material(mat);
             if (def.indestructible) continue;
 
@@ -431,7 +430,7 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
             const gate = opts.instant ? opts.power * w : opts.power;
             if (gate <= def.toughness) {
               // Вмятина не накапливается до пробоя стали кувалдой.
-              if (mat === Mat.Metal && cause === 'sledge') {
+              if (mat === Mat.Metal && cause === 'sledge' && (!opts.filterVoxel || opts.filterVoxel(shape, body, x, y, z))) {
                 shape.damage[i] = Math.min(def.hp - 1, shape.damage[i] + Math.max(1, Math.round(opts.damage * w)));
                 shape.markDirty(x, y, z);
                 shapeDamaged++;
@@ -439,6 +438,8 @@ export function carve(world: VoxelWorld, brush: Brush, opts: CarveOptions): Carv
               }
               continue;
             }
+
+            if (opts.filterVoxel && !opts.filterVoxel(shape, body, x, y, z)) continue;
 
             // Glass breaks locally. The uneven rim remains solid, can be hit again,
             // and is handled by the same collision/structure code as the intact pane.

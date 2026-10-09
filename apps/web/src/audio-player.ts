@@ -1,3 +1,4 @@
+import { fireSoundSamples } from './fire-sound.js';
 import { SoundCue, SoundId } from '@tvox/game';
 
 /**
@@ -33,6 +34,8 @@ export class AudioPlayer {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
+  private fireNoise: AudioBuffer | null = null;
+  private jetNoise: AudioBuffer | null = null;
   private loops = new Map<SoundId, Voice>();
   private muted = false;
   private suspended = true;
@@ -111,6 +114,12 @@ export class AudioPlayer {
     this.master.gain.value = this.muted ? 0 : 1;
     this.master.connect(this.ctx.destination);
     this.noise = makeNoise(this.ctx, 1.2);
+    for (const jet of [false, true]) {
+      const data = fireSoundSamples(this.ctx.sampleRate, 8, jet);
+      const buffer = this.ctx.createBuffer(1, data.length, this.ctx.sampleRate);
+      buffer.getChannelData(0).set(data);
+      if (jet) this.jetNoise = buffer; else this.fireNoise = buffer;
+    }
   }
 
   private oneShot(cue: SoundCue): void {
@@ -265,11 +274,11 @@ export class AudioPlayer {
     };
   }
 
-  /** Огонь: розоватый шум, слегка колышущийся по громкости. */
+  /** Горение потрескивает; у огнемёта отдельный низкий гул и шипение струи. */
   private makeFire(cue: SoundCue): Voice | null {
     const ctx = this.ctx;
     const master = this.master;
-    const noise = this.noise;
+    const noise = cue.id === 'flamethrower' ? this.jetNoise : this.fireNoise;
     if (!ctx || !master || !noise) return null;
 
     const gain = ctx.createGain();
@@ -282,12 +291,12 @@ export class AudioPlayer {
 
     const low = ctx.createBiquadFilter();
     low.type = 'lowpass';
-    low.frequency.value = cue.id === 'flamethrower' ? 900 : 1400;
+    low.frequency.value = cue.id === 'flamethrower' ? 2400 : 7500;
 
     const flicker = ctx.createOscillator();
-    flicker.frequency.value = cue.id === 'flamethrower' ? 18 : 7;
+    flicker.frequency.value = cue.id === 'flamethrower' ? 23 : 2.3;
     const flickerDepth = ctx.createGain();
-    flickerDepth.gain.value = 300;
+    flickerDepth.gain.value = 180;
     flicker.connect(flickerDepth).connect(low.frequency);
 
     src.connect(low).connect(gain);

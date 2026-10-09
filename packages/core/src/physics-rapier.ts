@@ -1,4 +1,4 @@
-import { Vec3, add, distance, normalize, rotateVec, scale, sub, v3 } from './math.js';
+import { Vec3, add, distance, length, normalize, rotateVec, scale, sub, v3 } from './math.js';
 import { Body } from './body.js';
 import { VoxelWorld } from './world.js';
 import { VoxelShape } from './voxel-shape.js';
@@ -6,7 +6,7 @@ import { ColliderBox, buildColliders, decomposeCoarse } from './collider.js';
 import { VoxelRegion } from './voxel-shape.js';
 import { PhysicsBackend } from './physics.js';
 import { carve } from './destruction.js';
-import { impactDamage } from './impact-damage.js';
+import { impactContact, impactDamage } from './impact-damage.js';
 
 export interface RapierPhysicsOptions {
   /**
@@ -436,11 +436,11 @@ export class RapierPhysics implements PhysicsBackend {
       // Удар — это резкая ПОТЕРЯ скорости. Гравитацию вычитать нельзя:
       // лежащее тело каждый шаг получает от опоры ровно противовес весу,
       // и с поправкой на g оно выглядело бы как вечный удар.
-      const dv = Math.hypot(
+      const dv = Math.min(length(entry.prevVelocity), Math.hypot(
         lv.x - entry.prevVelocity.x,
         lv.y - entry.prevVelocity.y,
         lv.z - entry.prevVelocity.z,
-      );
+      ));
       entry.lastSpeedDrop = dv;
       entry.lastImpulse = entry.rb.mass() * dv;
     }
@@ -539,6 +539,7 @@ export class RapierPhysics implements PhysicsBackend {
           // Контакт распределяет давление по пятну удара; размер пятна уже ограничен энергией.
           falloff: 'none',
           cause: 'impact',
+          filterVoxel: impactContact(body, speedDrop * Math.sqrt(contactShare), point, body === a ? b : a),
           protect: this.cfg.protectedMaterials,
         },
       );

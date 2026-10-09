@@ -1,6 +1,6 @@
 import {
   Aabb, Body, Mat, Simulation, Vec3, VoxelBox, VoxelShape,
-  aabbEmpty, aabbExpand, aabbOverlaps, add, clamp, decomposeToBoxes, transformPoint, v3,
+  aabbEmpty, aabbExpand, aabbOverlaps, add, clamp, decomposeToBoxes, transformPoint, v3, dot, sub, scale, distance,
 } from '@tvox/core';
 import { GateDef } from './level.js';
 import { overlapsSolid } from './character.js';
@@ -11,6 +11,9 @@ export class AutomaticGate {
   private readonly closed: Vec3;
   private readonly aperture: Aabb;
   private offset = 0;
+  private hand: { point: Vec3; normal: Vec3; offset: number } | null = null;
+  private handTarget = 0;
+  private visitor?: Aabb;
   private hold = 0;
   private recoilTo: number | null = null;
   private retry = 0;
@@ -36,10 +39,31 @@ export class AutomaticGate {
   restore(s: ReturnType<AutomaticGate['snapshot']>): void { Object.assign(this, s); this.geometry.clear(); }
 
   get opening(): number { return this.offset / this.def.rise; }
+  get held(): boolean { return this.hand !== null; }
+  private shift(n: number): Vec3 { const p = v3(); p[this.def.axis ?? 'y'] = n; return p; }
+
+  grab(eye: Vec3, direction: Vec3, point: Vec3): boolean {
+    if (!this.def.manual || !this.body.kinematic || this.body.destroyed || distance(eye, point) > 2.5) return false;
+    this.hand = { point: { ...point }, normal: { ...direction }, offset: this.offset };
+    this.handTarget = this.offset;
+    return true;
+  }
+  release(): void { this.hand = null; this.handTarget = this.offset; }
+  pull(eye: Vec3, direction: Vec3): void {
+    const hand = this.hand;
+    if (!hand) return;
+    const denominator = dot(direction, hand.normal);
+    if (Math.abs(denominator) < .15) { this.release(); return; }
+    const t = dot(sub(hand.point, eye), hand.normal) / denominator;
+    if (t < 0 || t > 5) { this.release(); return; }
+    const point = add(eye, scale(direction, t));
+    this.handTarget = clamp(hand.offset + dot(sub(point, hand.point), this.shift(1)), 0, this.def.rise);
+  }
 
   update(visitor: Aabb, dt: number): void {
     if (dt <= 0 || this.body.destroyed || !this.body.kinematic) return;
     if (this.support && this.support.shape.data[this.support.index] === Mat.Air) {
+      this.release();
       this.body.kinematic = false;
       this.body.tags.add('debris');
       this.body.collidersDirty = true;
@@ -47,6 +71,7 @@ export class AutomaticGate {
       this.sim.physics.sync(this.body);
       return;
     }
+    this.visitor = visitor;
     const box = this.aperture;
     const cx = (box.min.x + box.max.x) / 2;
     const cz = (box.min.z + box.max.z) / 2;
@@ -60,7 +85,8 @@ export class AutomaticGate {
     this.retry = Math.max(0, this.retry - dt);
     if (this.retry === 0) this.recoilTo = null;
     const recoiling = this.recoilTo !== null;
-    const target = this.recoilTo ?? (nearby || blocked || this.hold > 0 ? this.def.rise : 0);
+    const target = this.def.manual ? (this.held ? this.handTarget : this.offset) :
+      this.recoilTo ?? (nearby || blocked || this.hold > 0 ? this.def.rise : 0);
     const next = this.offset + clamp(target - this.offset, -this.def.speed * dt, this.def.speed * dt);
     if (next === this.offset) return;
     const motion = this.motionBoxes();
@@ -78,7 +104,7 @@ export class AutomaticGate {
       this.retry = Math.max(0.5, this.def.closeDelay);
       this.offset = clear;
     } else this.offset = next;
-    this.body.transform.position = add(this.closed, v3(0, this.offset, 0));
+    this.body.transform.position = add(this.closed, this.shift(this.offset));
     this.sim.physics.sync(this.body);
   }
 
@@ -108,10 +134,10 @@ export class AutomaticGate {
   private pathBlocked(boxes: Aabb[], from: number, to: number): boolean {
     const ignore = new Set([this.body.id]);
     for (const body of this.sim.world.bodies.values()) if (body.passive) ignore.add(body.id);
-    return boxes.some(box => overlapsSolid(this.sim.world, {
-      min: add(box.min, v3(0, Math.min(from, to), 0)),
-      max: add(box.max, v3(0, Math.max(from, to), 0)),
-    }, ignore));
+    return boxes.some(box => { const swept = {
+      min: add(box.min, this.shift(Math.min(from, to))),
+      max: add(box.max, this.shift(Math.max(from, to))),
+    }; return (this.def.manual && this.visitor && aabbOverlaps(swept, this.visitor)) || overlapsSolid(this.sim.world, swept, ignore); });
   }
 
   private obstructed(): boolean {

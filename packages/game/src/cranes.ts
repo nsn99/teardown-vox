@@ -30,6 +30,8 @@ export class PortCrane {
   private parts: Part[];
   private base: { body: Body; shape: VoxelShape; indices: number[] };
   private boomSupport: number[];
+  private legSections: number[][][] = [];
+  private baseRevision = -1;
   private tipSupport: number[];
   private staySupport: number[];
   private ropeShape: VoxelShape;
@@ -48,6 +50,20 @@ export class PortCrane {
     const baseShape = baseBody?.shapes.find(s => s.name === def.base.volume);
     if (!baseBody || !baseShape) throw new Error(`Кран «${def.id}»: нет опоры «${def.base.volume}»`);
     this.base = { body: baseBody, shape: baseShape, indices: def.base.anchors.map(p => baseShape.idx(p.x, p.y, p.z)) };
+    if (def.base.legBottom !== undefined) {
+      const r = def.base.legRadius ?? 4;
+      this.legSections = def.base.anchors.map(anchor => {
+        const layers: number[][] = [];
+        for (let y = def.base.legBottom!; y <= anchor.y; y++) {
+          const layer: number[] = [];
+          for (let x = anchor.x - r; x < anchor.x + r; x++) for (let z = anchor.z - r; z < anchor.z + r; z++) {
+            if (baseShape.inBounds(x, y, z) && baseShape.get(x, y, z) !== Mat.Air) layer.push(baseShape.idx(x, y, z));
+          }
+          if (layer.length) layers.push(layer);
+        }
+        return layers;
+      });
+    }
     this.parts = [def.house, def.boom, def.hook].map(p => this.mountPart(p));
     [this.house, this.boom, this.hook] = this.parts.map(p => p.body);
     const hookShape = this.parts[2].shape;
@@ -259,7 +275,44 @@ export class PortCrane {
     this.sim.physics.sync(body);
   }
 
+  private checkStability(): void {
+    if (!this.alive(this.house) || !this.legSections.length || this.baseRevision === this.base.shape.revision) return;
+    this.baseRevision = this.base.shape.revision;
+    const shape = this.base.shape;
+    const live = this.legSections.map(sections => sections.every(layer =>
+      layer.filter(i => shape.data[i] !== Mat.Air).length >= Math.max(1, layer.length * .2)));
+    if (live.filter(Boolean).length > 2) return;
+    const positions = this.def.base.anchors.map(p => shape.voxelCenterWorld(p.x, this.def.base.legBottom!, p.z, this.base.body.transform));
+    const center = scale(positions.reduce((sum, p) => add(sum, p), v3()), 1 / positions.length);
+    const missing = positions.filter((_, i) => !live[i]);
+    let direction = sub(scale(missing.reduce((sum, p) => add(sum, p), v3()), 1 / missing.length), center);
+    // Opposite missing legs have no single missing-side centroid; the boom biases the fall.
+    if (length(direction) < .01) direction = sub(this.tip, center);
+    direction.y = 0; direction = normalize(direction);
+    const spin = scale(cross(v3(0, 1, 0), direction), .18);
+    const indices: number[] = [];
+    for (let i = 0; i < shape.volume; i++) if (shape.data[i] !== Mat.Air && shape.coords(i).y >= this.def.base.legBottom!) indices.push(i);
+    const falling: Body[] = [];
+    if (indices.length) {
+      const tower = extractFragment(this.base.body, shape, indices).body;
+      this.sim.world.addBody(tower); falling.push(tower);
+    }
+    this.releaseLoad();
+    for (const part of [this.house, this.boom, this.hook, this.ropes, this.stay]) {
+      this.release(part); falling.push(part);
+    }
+    for (const body of falling) {
+      body.angularVelocity = { ...spin };
+      const com = body.shapes[0]?.centerOfMass() ?? v3();
+      const at = body.shapes[0] ? transformPoint(body.transform, transformPoint(body.shapes[0].transform, com)) : body.transform.position;
+      body.velocity = cross(spin, sub(at, center)); body.velocityDirty = true; body.wake();
+      this.sim.physics.sync(body);
+    }
+    this.sim.physics.sync(this.base.body);
+  }
+
   private checkDamage(): void {
+    this.checkStability();
     if (this.base.body.destroyed || !this.base.body.shapes.includes(this.base.shape) ||
         this.base.indices.every(i => this.base.shape.data[i] === Mat.Air)) {
       for (const body of [this.house, this.boom, this.hook, this.ropes, this.stay]) this.release(body);

@@ -12,6 +12,8 @@ import {
   bodyMovementBlocked,
   bodySolidBounds,
   clamp,
+  material,
+  aabbOverlaps,
   dot,
   length,
   quatFromEulerYXZ,
@@ -27,12 +29,13 @@ import { overlapsSolid } from './character.js';
 import { VehicleFootprint, dentVehicle, vehicleContact, vehicleContactPoint } from './vehicle-contact.js';
 import { VehicleWheel, buildVehicleWheels, wheelPose } from './vehicle-wheels.js';
 import { VehicleSupportPoint, vehicleOrientation, vehicleSupport } from './vehicle-support.js';
+import { Forklift, buildForkliftHull } from './forklift.js';
 import { TruckDeck } from './truck-deck.js';
 import { VehicleTrack, buildVehicleTracks } from './vehicle-tracks.js';
 
 const vehicleBodies = new WeakMap<Body, Vehicle>();
 
-export type VehicleKind = 'car' | 'pickup' | 'truck' | 'boat' | 'excavator' | 'bulldozer';
+export type VehicleKind = 'car' | 'pickup' | 'truck' | 'boat' | 'excavator' | 'bulldozer' | 'forklift';
 
 export interface VehicleSpec {
   kind: VehicleKind;
@@ -62,6 +65,11 @@ export interface VehicleSpec {
 }
 
 export const VEHICLES: Record<VehicleKind, VehicleSpec> = {
+  forklift: {
+    kind: 'forklift', name: 'Вилочный погрузчик', size: { x: 46, y: 34, z: 24 }, material: Mat.HeavyMetal,
+    maxSpeed: 6, reverseSpeed: 4, accel: 3, brake: 8, turnRate: 1.3,
+    aquatic: false, amphibious: false, blade: null, ramSpeed: 3,
+  },
   truck: {
     kind: 'truck', name: 'Грузовик', size: { x: 96, y: 29, z: 34 }, material: Mat.Metal,
     maxSpeed: 14, reverseSpeed: 5, accel: 3.5, brake: 9, turnRate: 0.65,
@@ -214,6 +222,7 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
   shape.fill({}, Mat.Air);
 
   switch (kind) {
+    case 'forklift': buildForkliftHull(shape); break;
     case 'truck': {
       shape.fill({ x0: 2, x1: 95, y0: 5, y1: 9, z0: 5, z1: z - 5 }, material);
       // Длинная открытая платформа: кран опускает груз сверху.
@@ -301,10 +310,12 @@ function buildVehicleHull(shape: VoxelShape, kind: VehicleKind, material: Mat): 
       // Кормовая площадка и привальный брус.
       part(0, 5, 4, 5, 3, z - 3, material, white);
       for (const bz of [1, z - 2]) part(4, 46, 5, 6, bz, bz + 1, material, trim);
+      // Yellow loading marks frame the open stern, clear of the fork tines.
+      for (const bx of [4, 17]) part(bx, bx + 1, 7, 8, 3, z - 3, material, 0xd7ac32);
       // Рубка с наклонными бортами, кормой и лобовым стеклом.
       // Два вокселя в наклонных панелях сохраняют связность соседних ступеней.
       for (let by = 8; by < y; by++) {
-        const layer = by - 8, rear = 6 + Math.floor(layer / 2), front = 36 - layer;
+        const layer = by - 8, rear = 18 + Math.floor(layer / 2), front = 36 - layer;
         const side = 2 + Math.floor(layer / 3);
         if (by === y - 1) {
           part(rear, front + 2, by, by + 1, side, z - side, material, white);
@@ -423,6 +434,7 @@ export class Vehicle {
   readonly wheels: VehicleWheel[];
   readonly tracks: VehicleTrack[];
   readonly deck: TruckDeck | null;
+  readonly forklift: Forklift | null;
   position: Vec3;
   yaw: number;
   speed = 0;
@@ -437,6 +449,7 @@ export class Vehicle {
   /** Цели, лежащие в кузове. Едут вместе с машиной. */
   readonly cargo = new Set<string>();
   private flooded = 0;
+  private fireExposure = 0;
   private drowned = 0;
   private voxelSize: number;
   private waterLevel: number;
@@ -472,6 +485,17 @@ export class Vehicle {
       name: `${kind}-hull`,
     });
     buildVehicleHull(shape, kind, this.spec.material);
+    // Combustible hoses/oily engine grilles, accessible from the sides, remain
+    // part of the hull: exposed fuel burns while the surrounding steel survives.
+    const engine: Record<VehicleKind, number[]> = {
+      car: [31, 8, 2, 36, 16], pickup: [39, 9, 2, 44, 18], truck: [70, 7, 5, 80, 29],
+      boat: [3, 6, 0, 9, 22], excavator: [5, 15, 6, 16, 22],
+      bulldozer: [29, 13, 10, 39, 24], forklift: [2, 13, 3, 8, 21],
+    };
+    const [ex0, ey, ez0, ex1, ez1] = engine[kind];
+    for (const ez of [ez0, ez1 - 1]) for (let ex = ex0; ex < ex1; ex++) {
+      shape.set(ex, ey, ez, Mat.Fuel); shape.paint.delete(shape.idx(ex, ey, ez));
+    }
     this.bladeShape = this.spec.blade ? new VoxelShape({ sx: x, sy: y, sz: z,
       voxelSize: this.voxelSize, grounded: false, name: `${kind}-blade` }) : null;
     if (this.bladeShape) {
@@ -497,7 +521,7 @@ export class Vehicle {
       }
       this.poseBladeLinks();
     }
-    this.wheels = kind === 'car' || kind === 'pickup' || kind === 'truck' ? buildVehicleWheels(kind, this.voxelSize, v3(x, y, z)) : [];
+    this.wheels = kind === 'car' || kind === 'pickup' || kind === 'truck' || kind === 'forklift' ? buildVehicleWheels(kind, this.voxelSize, v3(x, y, z)) : [];
     this.tracks = buildVehicleTracks(kind, this.voxelSize);
     for (const wheel of this.wheels) {
       const cx = wheel.center.x / this.voxelSize + x / 2;
@@ -535,14 +559,15 @@ export class Vehicle {
       return { ...v3(wheel.center.x, 0, wheel.center.z), probes };
     }) : [-1, 1].flatMap(x => [-1, 1].map(z => v3(x * this.spec.size.x * this.voxelSize * 0.27,
       0, z * this.spec.size.z * this.voxelSize * 0.36)));
+    this.forklift = kind === 'forklift' ? new Forklift(this.body, this.voxelSize) : null;
     this.initialVoxels = this.body.solidVoxels;
-    this.deck = kind === 'truck' ? new TruckDeck(this.body, this.voxelSize) : null;
+    this.deck = kind === 'truck' || kind === 'boat' ? new TruckDeck(this.body, this.voxelSize, kind === 'boat') : null;
     vehicleBodies.set(this.body, this);
   }
 
   snapshot() { return structuredClone({ position: this.position, yaw: this.yaw, speed: this.speed,
     speedLimit: this.speedLimit, bladeHeight: this.bladeHeight, wrecked: this.wrecked,
-    flooded: this.flooded, drowned: this.drowned, slide: this.slide, verticalSpeed: this.verticalSpeed,
+    flooded: this.flooded, fireExposure: this.fireExposure, drowned: this.drowned, slide: this.slide, verticalSpeed: this.verticalSpeed,
     impactDelay: this.impactDelay, yawSpeed: this.yawSpeed, grounded: this.grounded,
     steeringAngle: this.steeringAngle, wheelRotation: this.wheelRotation, pitch: this.pitch, roll: this.roll,
     physicalPrevious: this.physicalPrevious, cargo: [...this.cargo] }); }
@@ -595,6 +620,7 @@ export class Vehicle {
   }
 
   get driverEye(): Vec3 {
+    if (this.spec.kind === 'forklift') return transformPoint(this.body.transform, v3(-.6, 2.2, 0));
     if (this.spec.kind === 'boat') return transformPoint(this.body.transform, v3(0, 12.5 * this.voxelSize, -3 * this.voxelSize));
     return this.deck ? transformPoint(this.body.transform, v3(3.3, 2.2, 0)) : add(this.position, v3(0, 1.4, 0));
   }
@@ -647,7 +673,7 @@ export class Vehicle {
     if (rotateVec(this.body.transform.rotation, v3(0, 1, 0)).y > 0.9) return 'upright';
     const box = bodySolidBounds(this.body);
     const ignore = new Set([...sim.world.bodies.values()].filter(b => b.tags.has('vehicle') ||
-      b.tags.has('truck-load')).map(b => b.id));
+      b.tags.has('truck-load') || b === this.forklift?.load).map(b => b.id));
     const hit = sim.world.raycast(v3(this.position.x, box.min.y + 0.3, this.position.z), v3(0, -1, 0), {
       maxDistance: this.spec.size.y * this.voxelSize + 3, ignore,
       filter: mat => mat !== Mat.Water && mat !== Mat.Paint,
@@ -666,19 +692,23 @@ export class Vehicle {
   }
 
   update(sim: Simulation, input: VehicleInput, dt: number): void {
-    if (this.body.destroyed) { this.deck?.release(sim); return; }
+    if (this.body.destroyed) { this.deck?.release(sim); this.forklift?.release(sim); return; }
     if (dt <= 0) return;
     dt = Math.min(dt, 0.1);
+    const burning = sim.fire.burningOn(this.body);
+    this.fireExposure = Math.max(0, this.fireExposure + (burning ? Math.min(3, .75 + burning / 4) : -.2) * dt);
+    if (this.fireExposure >= 15) this.wrecked = true;
     this.impactDelay = Math.max(0, this.impactDelay - dt);
     if (!this.body.kinematic && this.updatePhysical(sim, dt)) return;
     // Корпус развалился больше чем наполовину — техника мертва.
     if (this.hullIntegrity < 0.45) {
       this.wrecked = true;
     }
+    this.forklift?.update(sim, input.bladeLift ?? 0, dt, this.wrecked);
     this.senseWater(sim);
     this.updateVertical(sim, dt);
     this.updateWater(dt);
-    if (!this.body.kinematic) return;
+    if (!this.body.kinematic) { this.forklift?.release(sim); return; }
     if (!this.wrecked && this.grounded && this.spec.blade) {
       this.bladeHeight = clamp(this.bladeHeight + (input.bladeLift ?? 0) * dt * 0.8, 0, 1.6);
       if (this.bladeShape && this.bladeShape.transform.position.y !== this.bladeHeight) {
@@ -727,20 +757,22 @@ export class Vehicle {
     const steps = Math.max(1, Math.ceil(length(delta) / 0.15));
     const start = { ...this.position };
     for (let i = 0; i < steps; i++) {
-      const next = add(this.position, scale(delta, 1 / steps));
+      const next = add(this.position, scale(this.horizontalVelocity(), dt / steps));
       const collision = this.contactAt(sim, next);
       if (collision) { this.crash(sim, collision.other, collision.normal); break; }
       if (this.probeBlocked(sim, next)) {
-        if (!this.wrecked && this.punchThrough(sim, dt / steps)) this.position = next;
+        const pushed = this.pushContact(sim, next);
+        if (!pushed && !this.wrecked && this.punchThrough(sim, dt / steps)) this.position = next;
         else {
           const impact = Math.abs(this.speed);
-          if (impact >= 3 && this.impactDelay === 0) {
+          if (!pushed && impact >= 3 && this.impactDelay === 0) {
             const outward = scale(this.forward, this.speed < 0 ? -1 : 1);
             dentVehicle(sim, this.body, add(add(this.position, scale(outward, this.spec.size.x * this.voxelSize / 2)),
               v3(0, this.spec.size.y * this.voxelSize * 0.35, 0)), scale(outward, -1), impact);
-            this.speed *= this.tracks.length ? 0 : -0.25;
+            // A solid obstacle absorbs momentum over the contact, not by a fixed multiplier.
+            this.speed = approach(this.speed, 0, (this.tracks.length ? 18 : 30) * dt);
             this.impactDelay = this.tracks.length ? 0.06 : 0.4;
-          } else this.speed *= 0.15;
+          } else if (!pushed) this.speed = approach(this.speed, 0, 24 * dt);
           this.slide = v3(); break;
         }
       } else this.position = next;
@@ -762,6 +794,7 @@ export class Vehicle {
     this.syncBody();
     sim.physics.sync(this.body);
     this.deck?.update(sim, this.wrecked);
+    this.forklift?.follow(sim);
   }
 
   private footprint(position = this.position): VehicleFootprint {
@@ -775,6 +808,8 @@ export class Vehicle {
       const other = vehicleBodies.get(body);
       if (!other) continue;
       const contact = vehicleContact(this.footprint(position), other.footprint());
+      if (contact && (this.forklift || other.forklift) && !bodyMovementBlocked(sim.world, this.body, this.body.transform,
+        { position, rotation: this.orientation }, undefined, candidate => candidate === other.body)) continue;
       if (contact) return { other, normal: contact.normal };
     }
     return null;
@@ -864,6 +899,7 @@ export class Vehicle {
     for (const wheel of this.wheels) wheel.pose = wheelPose(wheel, this.steeringAngle, this.wheelRotation);
     this.physicalPrevious = { ...this.position };
     this.deck?.update(sim, this.wrecked);
+    this.forklift?.follow(sim);
     return true;
   }
 
@@ -1005,6 +1041,7 @@ export class Vehicle {
     // а таран при этом резал бы воксели в метре перед собой — машина
     // вставала бы, ничего не пробив.
     const half = (this.spec.size.x / 2) * this.voxelSize;
+    if (this.forklift) return false; // Actual fork voxels and payload were checked above.
     // Проверяем препятствие со стороны фактического движения.
     // При заднем ходе щуп должен быть у заднего бампера, иначе стена
     // перед носом не даёт машине отъехать от неё.
@@ -1040,9 +1077,9 @@ export class Vehicle {
    */
   private punchThrough(sim: Simulation, dt: number): boolean {
     const speed = Math.abs(this.speed);
-    // Кузов не заменяет ковш. Легковой удар берёт лишь слабые ограды;
-    // кирпич, бетон, сталь и сама дорога не прорезаются на скорости.
-    if (this.spec.blade || speed < this.spec.ramSpeed) return false;
+    if (speed < 2 || this.impactDelay > 0) return false;
+    const mass = Math.max(1, this.body.mass());
+    const energy = .5 * mass * speed * speed;
     const direction = scale(this.forward, this.speed < 0 ? -1 : 1);
     const halfH = this.spec.size.y * this.voxelSize / 2;
     const halfW = this.spec.size.z * this.voxelSize / 2;
@@ -1051,27 +1088,62 @@ export class Vehicle {
     const side = v3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const radius = Math.hypot(halfH, PROBE_HALF) + this.voxelSize * 0.5;
     const span = Math.max(0, halfW - radius);
+    const forwardContact = this.toolFilter(this.speed < 0 ? -1 : 1);
+    const ramContact = (shape: VoxelShape, body: Body, x: number, y: number, z: number) => {
+      // A chassis can break masonry and props, but cannot excavate a solid
+      // concrete slab or rock face like a working demolition bucket.
+      const mat = shape.get(x, y, z);
+      return mat !== Mat.Concrete && mat !== Mat.Rock && forwardContact(shape, body, x, y, z);
+    };
     const res = carve(sim.world, {
       kind: 'capsule', a: add(bumper, scale(side, -span)), b: add(bumper, scale(side, span)), radius,
     }, {
-      power: 0.25, damage: 0, instant: true, falloff: 'none', cause: 'ram',
-      maxVoxels: 1200, ignoreBodies: this.toolIgnore(sim), filterVoxel: this.toolFilter(this.speed < 0 ? -1 : 1),
+      power: clamp(.16 + energy / 1_200_000, .16, this.spec.material === Mat.HeavyMetal ? 1.1 : .58), damage: 0, instant: true, falloff: 'none', cause: 'ram',
+      maxVoxels: Math.max(1, Math.min(2400, Math.floor(energy / 350))), ignoreBodies: this.toolIgnore(sim), filterVoxel: ramContact,
       physicalDebris: { velocity: add(scale(direction, speed * 0.15), v3(0, 0.7, 0)), maxFragments: 8 },
     });
     if (res.removed === 0) return false;
     const next = add(this.position, scale(this.forward, this.speed * dt));
-    this.speed *= 0.35;
+    let work = 0;
+    for (const [mat, count] of res.byMaterial) work += count * (80 + material(mat).toughness * 900);
+    this.speed = Math.sign(this.speed) * Math.sqrt(Math.max(0, speed * speed - 2 * work / mass));
     return !this.probeBlocked(sim, next);
+  }
+
+  private pushContact(sim: Simulation, next: Vec3): boolean {
+    const ahead = scale(this.forward, Math.sign(this.speed || 1) * .4);
+    const pose = { position: add(next, ahead), rotation: this.orientation };
+    const box = this.body.aabb();
+    const delta = sub(next, this.position);
+    const swept = { min: add(add(box.min, delta), v3(-.4, 0, -.4)), max: add(add(box.max, delta), v3(.4, 0, .4)) };
+    for (const body of sim.world.bodies.values()) {
+      if (body === this.body || body.destroyed || body.passive || body.kinematic || body.kind !== 'dynamic' ||
+          body.tags.has('vehicle') || !aabbOverlaps(swept, bodySolidBounds(body))) continue;
+      if (!bodyOverlapsWorld(sim.world, this.body, pose, undefined, other => other === body)) continue;
+      const normal = scale(this.forward, Math.sign(this.speed || 1));
+      const closing = Math.max(0, dot(sub(this.horizontalVelocity(), body.velocity), normal));
+      if (closing > .05) {
+        const m1 = Math.max(1, this.body.mass() + (this.forklift?.load?.mass() ?? 0)), m2 = Math.max(1, body.mass());
+        const impulse = 1.05 * closing / (1 / m1 + 1 / m2);
+        sim.physics.sync(body);
+        sim.physics.applyImpulse(body, scale(normal, impulse));
+        this.setHorizontalVelocity(sub(this.horizontalVelocity(), scale(normal, impulse / m1)));
+        this.impactDelay = .08;
+      }
+      return true;
+    }
+    return false;
   }
 
   private toolIgnore(sim: Simulation): Set<number> {
     return new Set([...sim.world.bodies.values()].filter(b =>
-      b.tags.has('vehicle') || b.tags.has('carved-debris') || b.tags.has('truck-load')).map(b => b.id));
+      b.tags.has('vehicle') || b.tags.has('carved-debris') || b.tags.has('truck-load') || b === this.forklift?.load).map(b => b.id));
   }
 
   private worldBlocked(sim: Simulation, pose: Transform, from?: Transform): boolean {
+    if (this.forklift?.blocks(sim, pose) || this.deck?.blocks(sim, pose)) return true;
     const filter = (other: Body) =>
-      !other.tags.has('vehicle') && !other.tags.has('truck-load') &&
+      !other.tags.has('vehicle') && !other.tags.has('truck-load') && other !== this.forklift?.load &&
       !(other.kind === 'dynamic' && other.tags.has('carved-debris'));
     return from ? bodyMovementBlocked(sim.world, this.body, from, pose, undefined, filter)
       : bodyOverlapsWorld(sim.world, this.body, pose, undefined, filter);

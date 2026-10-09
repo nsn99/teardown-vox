@@ -1,5 +1,5 @@
 import { Body, Simulation, Transform, Vec3, add, inverseTransformPoint, length, quatConjugate,
-  cross, quatMultiply, sub, transformPoint, v3 } from '@tvox/core';
+  bodyMovementBlocked, cross, quatMultiply, sub, transformPoint, v3 } from '@tvox/core';
 
 interface SecuredLoad { body: Body; local: Transform }
 export type TruckLoadResult = 'secured' | 'released' | 'empty' | 'moving';
@@ -9,7 +9,8 @@ export class TruckDeck {
   private loads = new Map<number, SecuredLoad>();
   readonly min: Vec3;
   readonly max: Vec3;
-  constructor(private truck: Body, size: number) {
+  constructor(private truck: Body, size: number, private boat = false) {
+    if (boat) { this.min = v3(-22 * size, 8 * size, -8 * size); this.max = v3(-8 * size, 25 * size, 8 * size); return; }
     this.min = v3(-46 * size, 12 * size, -16 * size);
     this.max = v3(16 * size, 40 * size, 16 * size);
   }
@@ -26,8 +27,8 @@ export class TruckDeck {
     if (this.loads.size) { this.release(sim); return 'released'; }
     for (const body of sim.world.bodies.values()) {
       if (body.destroyed || body.passive || body.kind !== 'dynamic' || body.kinematic || body.solidVoxels === 0 ||
-          body.tags.has('vehicle') || body.tags.has('target') || body.tags.has('crane') || body.tags.has('crane-load') ||
-          (!body.tags.has('cargo') && !body.tags.has('debris')) || length(body.velocity) > 1.5) continue;
+          body.tags.has('vehicle') || (!this.boat && body.tags.has('target')) || body.tags.has('crane') || body.tags.has('crane-load') ||
+          (!body.tags.has('cargo') && !body.tags.has('debris') && !(this.boat && body.tags.has('target'))) || length(body.velocity) > 1.5) continue;
       const corners = body.shapes.flatMap(shape => {
         const box = shape.localAabb();
         return Array.from({ length: 8 }, (_, i) => inverseTransformPoint(this.truck.transform,
@@ -37,7 +38,7 @@ export class TruckDeck {
       const min = v3(Math.min(...corners.map(p => p.x)), Math.min(...corners.map(p => p.y)), Math.min(...corners.map(p => p.z)));
       if (corners.some(p => p.x < this.min.x - 0.08 || p.x > this.max.x + 0.08 ||
           p.z < this.min.z - 0.08 || p.z > this.max.z + 0.08) || Math.abs(min.y - this.min.y) > 0.25 ||
-          this.mass + body.mass() > 8000) continue;
+          this.mass + body.mass() > (this.boat ? 1200 : 8000)) continue;
       this.loads.set(body.id, { body, local: { position: inverseTransformPoint(this.truck.transform, body.transform.position),
         rotation: quatMultiply(quatConjugate(this.truck.transform.rotation), body.transform.rotation) } });
       body.kinematic = true; body.tags.add('truck-load'); body.wake();
@@ -46,10 +47,28 @@ export class TruckDeck {
     return this.loads.size ? 'secured' : 'empty';
   }
 
+  blocks(sim: Simulation, pose: Transform): boolean {
+    for (const { body, local } of this.loads.values()) {
+      const next = { position: transformPoint(pose, local.position), rotation: quatMultiply(pose.rotation, local.rotation) };
+      if (bodyMovementBlocked(sim.world, body, body.transform, next, undefined,
+        other => other !== this.truck && !this.loads.has(other.id))) return true;
+    }
+    return false;
+  }
+
   update(sim: Simulation, wrecked: boolean): void {
     if (wrecked || this.truck.destroyed) { this.release(sim); return; }
     for (const [id, load] of this.loads) {
       if (load.body.destroyed || !sim.world.bodies.has(id) || load.body.solidVoxels === 0) { this.loads.delete(id); continue; }
+      if (this.boat) {
+        const at = transformPoint(this.truck.transform, v3(load.local.position.x, this.min.y + .1, load.local.position.z));
+        const support = sim.world.raycast(at, v3(0, -1, 0), { maxDistance: .3,
+          filter: (_mat, _shape, body) => body === this.truck });
+        if (!support) {
+          load.body.kinematic = false; load.body.tags.delete('truck-load'); load.body.velocityDirty = true;
+          load.body.wake(); sim.physics.sync(load.body); this.loads.delete(id); continue;
+        }
+      }
       load.body.transform = { position: transformPoint(this.truck.transform, load.local.position),
         rotation: quatMultiply(this.truck.transform.rotation, load.local.rotation) };
       load.body.velocity = add(this.truck.velocity, cross(this.truck.angularVelocity,

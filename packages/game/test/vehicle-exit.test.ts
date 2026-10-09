@@ -53,9 +53,10 @@ describe('высадка из техники', () => {
   it('машина вплотную к стене высаживает с другой стороны', () => {
     const h = heist();
     const van = h.vehicles.get('van')!;
-    // Ставим пикап впритык к передней стене склада (склад: x 6..26, z 14..30).
-    van.position = v3(16, 0.1, 13.2);
+    // Задний бампер перед вынесенной наружу створкой (z=13.2), кузов целиком снаружи.
+    van.position = v3(16, 0.1, 10.5);
     van.yaw = 0;
+    van.update(h.sim, NEUTRAL_INPUT, 1 / 60);
     h.character.teleport({ ...van.position });
     h.toggleVehicle();
     const out = h.exitPosition(van);

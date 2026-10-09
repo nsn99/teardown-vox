@@ -10,6 +10,22 @@ function object(sim: Simulation, mat = Mat.Wood, size = [4, 4, 4], at = v3(-.2, 
   sim.world.addBody(b); return b;
 }
 const eye = v3(0, 1.2, 0), dir = v3(0, 0, -1);
+it('бросок освобождает руки; тяжёлый предмет летит медленнее лёгкого и падает', () => {
+  const speeds: number[] = [];
+  for (const size of [2, 3]) {
+    const sim = new Simulation(), hand = new HandCarry();
+    try {
+      const body = object(sim, Mat.Wood, [size, size, size], v3(-.1, 1.1, -1.4));
+      expect(hand.pick(sim, eye, dir)).toBe(true);
+      expect(hand.throw(sim, dir)).toBe(body); expect(hand.body).toBeNull(); expect(body.kinematic).toBe(false);
+      speeds.push(-body.velocity.z); const y = body.transform.position.y;
+      for (let i = 0; i < 10; i++) sim.physics.step(1 / 60);
+      expect(body.transform.position.y).toBeLessThan(y); expect(body.transform.position.z).toBeLessThan(-1.8);
+      expect(hand.throw(sim, dir)).toBeNull();
+    } finally { sim.dispose(); }
+  }
+  expect(speeds[0]).toBeGreaterThan(speeds[1]);
+});
 describe('переноска рукой', () => {
   it('берёт свободный предмет, переносит и возвращает физику после отпускания', () => {
     const sim = new Simulation(), hand = new HandCarry();

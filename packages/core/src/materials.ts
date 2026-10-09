@@ -33,6 +33,8 @@ export enum Mat {
   Cable = 17,
   /** Thin sheet / hollow roof profiles: voxel is an envelope, not solid steel. */
   RoofMetal = 18,
+  Rubber = 19,
+  Fuel = 20,
 }
 
 export interface MaterialDef {
@@ -237,6 +239,14 @@ export const MATERIALS: readonly MaterialDef[] = (() => {
       roughness: 0.05,
     }),
   );
+  put(def(Mat.Rubber, 'rubber', {
+    density: 1100, toughness: .2, hp: 40, color: [30, 35, 39],
+    flammability: .65, fuel: 35, maxStress: 300_000, maxMoment: 120, roughness: .95,
+  }));
+  put(def(Mat.Fuel, 'fuel', {
+    density: 850, toughness: .1, hp: 20, color: [53, 48, 36],
+    flammability: 1, fuel: 50, maxStress: 300_000, maxMoment: 120, roughness: .85,
+  }));
   put(
     def(Mat.Plastic, 'plastic', {
       density: 950,
@@ -372,6 +382,7 @@ export function materialByColor(r: number, g: number, b: number): MaterialDef {
 }
 
 const EXCLUDED_FROM_PALETTE: ReadonlySet<number> = new Set([
+  Mat.Fuel,
   Mat.RoofMetal,
   Mat.Air,
   Mat.Foundation,

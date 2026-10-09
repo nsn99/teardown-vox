@@ -11,7 +11,8 @@ describe('круглые поворачивающиеся колёса', () => {
       const shape = wheel.shape;
       expect(shape.get(0, 0, 0)).toBe(Mat.Air);
       expect(shape.get(shape.sx - 1, shape.sy - 1, 0)).toBe(Mat.Air);
-      expect(shape.get(Math.floor(shape.sx / 2), 0, 0)).toBe(Mat.Metal);
+      expect(shape.get(Math.floor(shape.sx / 2), 0, 0)).toBe(Mat.Rubber);
+      expect(shape.get(Math.floor(shape.sx / 2), Math.floor(shape.sy / 2), 0)).toBe(Mat.Metal);
       expect(new Set(shape.paint.values()).size).toBeGreaterThanOrEqual(4);
       expect([...shape.paint.values()]).toContain(0x1e5bd54);
     }

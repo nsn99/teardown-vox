@@ -19,3 +19,5 @@ export * from './vox.js';
 export * from './session.js';
 
 export * from './hand-carry.js';
+
+export * from './forklift.js';

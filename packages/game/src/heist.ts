@@ -78,6 +78,8 @@ export class Heist {
   readonly charges = new ChargeSystem();
   readonly planks = new PlankBuilder();
   readonly hands = new HandCarry();
+  heldGate: AutomaticGate | null = null;
+  releaseGate(): void { this.heldGate?.release(); this.heldGate = null; }
   /** Вертолёт и катер: то, чем кончается таймер. */
   readonly pursuit: Pursuit;
   /**
@@ -289,7 +291,7 @@ export class Heist {
     if (!carried) return null;
     const from = this.playerPosition;
     for (const [id, veh] of this.vehicles) {
-      if (veh.wrecked) continue;
+      if (veh.wrecked || this.targetBodies.get(carried)?.kinematic) continue;
       const d = Math.hypot(
         veh.position.x - from.x,
         veh.position.y - from.y,
@@ -380,7 +382,7 @@ export class Heist {
 
   /** Основное действие инструментом (ЛКМ). */
   use(): ToolUseResult {
-    if (this.hands.body) return { used: false, tool: this.inventory.active, reason: 'no-target' };
+    if (this.hands.body || this.heldGate) return { used: false, tool: this.inventory.active, reason: 'no-target' };
     const ctx = this.toolContext();
     if (this.inventory.active === 'explosive') {
       const charge = this.charges.place(ctx);
@@ -397,11 +399,23 @@ export class Heist {
     return this.charges.detonateAll(this.sim, this.protectedMaterials());
   }
 
+  throwHeld(): Body | null {
+    if (this.hands.body) return this.hands.throw(this.sim, this.aimDirection);
+    const id = this.mission.carriedIds[0], body = id ? this.targetBodies.get(id) : undefined;
+    if (!body || !this.mission.drop(id, body.transform.position)) return null;
+    body.kinematic = false; body.sleeping = false;
+    body.velocity = scale(normalize(this.aimDirection), Math.min(9, Math.sqrt(240 / Math.max(.5, body.mass()))));
+    body.angularVelocity = v3(1.2, .5, -.8); body.velocityDirty = true; body.wake(); this.sim.physics.sync(body);
+    this.events.emit('target:dropped', { id });
+    return body;
+  }
+
   /**
    * Взять / положить цель. Работает по прицелу в пределах REACH.
    * Возвращает id цели, с которой что-то произошло.
    */
   interact(): string | null {
+    if (this.heldGate) { this.releaseGate(); return null; }
     if (this.hands.body) return `body:${this.hands.drop(this.sim)!.id}`;
     const carried = this.mission.carriedIds[0];
     if (carried) {
@@ -424,6 +438,8 @@ export class Heist {
       ignore: this.ignoredBodies(),
     });
     if (!hit) return null;
+    const gate = this.gates.find(g => g.body === hit.body);
+    if (gate?.grab(this.eye, this.aimDirection, hit.point)) { this.heldGate = gate; return `gate:${gate.def.id}`; }
     const tag = [...hit.body.tags].find((t) => t.startsWith('target:'));
     if (!tag) return this.hands.pick(this.sim, this.eye, this.aimDirection) ? `body:${this.hands.body!.id}` : null;
     const id = tag.slice(7);
@@ -492,6 +508,7 @@ export class Heist {
       }
     }
     if (!best) return null;
+    this.releaseGate();
     this.hands.drop(this.sim);
     this.drivingId = best;
     this.yaw = this.vehicles.get(best)!.yaw;
@@ -529,6 +546,7 @@ export class Heist {
     if (this.drivingId || this.mission.carriedIds.length > 0) return null;
     const nearby = this.nearbyCrane;
     if (!nearby) return null;
+    this.releaseGate();
     this.hands.drop(this.sim);
     this.operatingId = nearby.def.id;
     this.character.teleport(nearby.seat);
@@ -554,7 +572,9 @@ export class Heist {
       if (crane === operator) this.yaw += Math.atan2(Math.sin(crane.yaw - yaw), Math.cos(crane.yaw - yaw));
     }
     const visitor = veh ? veh.body.aabb() : this.character.aabbAt(this.character.position);
+    this.heldGate?.pull(this.eye, this.aimDirection);
     for (const gate of this.gates) gate.update(visitor, dt);
+    if (this.heldGate && !this.heldGate.held) this.heldGate = null;
     if (veh) {
       const previousYaw = veh.yaw;
       veh.update(this.sim, vehicleInput, dt);
@@ -643,6 +663,7 @@ export class Heist {
   }
 
   restart(): void {
+    this.releaseGate();
     this.hands.drop(this.sim);
     this.shake.reset();
     this.shakeState = { offset: v3(), yaw: 0, pitch: 0, roll: 0 };

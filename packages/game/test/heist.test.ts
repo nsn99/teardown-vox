@@ -1,3 +1,4 @@
+import { slideGate } from './helpers/manual-gate.js';
 import { describe, expect, it } from 'vitest';
 import { Mat, Simulation, carve, stepStructure, v3 } from '@tvox/core';
 import {
@@ -197,7 +198,7 @@ describe('карта M: порт', () => {
 
   it('вся техника из дизайн-документа расставлена', () => {
     const kinds = new Set(portLevel.vehicles.map((v) => v.kind));
-    expect(kinds).toEqual(new Set(['pickup', 'car', 'boat', 'bulldozer', 'excavator', 'truck']));
+    expect(kinds).toEqual(new Set(['pickup', 'car', 'boat', 'bulldozer', 'excavator', 'truck', 'forklift']));
   });
 });
 
@@ -312,7 +313,7 @@ describe('прохождение ограбления', () => {
 
   it('садится в технику и выходит', () => {
     const h = startedHeist();
-    const van = portLevel.vehicles[0];
+    const van = portLevel.vehicles.find(v => v.id === 'van')!;
     h.character.teleport(van.position);
     expect(h.toggleVehicle()).toBe('van');
     expect(h.driving).not.toBeNull();
@@ -321,7 +322,7 @@ describe('прохождение ограбления', () => {
     expect(h.driving).toBeNull();
   });
 
-  it('портовый катер может начать движение вперёд', () => {
+  it('портовый катер отходит от причала с поворотом в гавань', () => {
     const h = startedHeist();
     const boat = h.vehicles.get('boat')!;
     h.character.teleport({ ...boat.position });
@@ -329,7 +330,7 @@ describe('прохождение ограбления', () => {
     expect(h.toggleVehicle()).toBe('boat');
 
     const before = { ...boat.position };
-    const drive = { throttle: 1, steer: 0, brake: false, blade: false };
+    const drive = { throttle: 1, steer: .5, brake: false, blade: false };
 
     for (let i = 0; i < 120; i++) {
       h.update(1 / 60, DEFAULT_INPUT, drive);
@@ -382,7 +383,7 @@ describe('прохождение ограбления', () => {
       h.inventory.tick(1);
     }
     const damaged = h.sim.world.totalSolidVoxels();
-    h.gates[0].update({ min: v3(15, 0.1, 12), max: v3(17, 2, 13) }, 1.1);
+    slideGate(h.gates[0], h.gates[0].def.rise);
     expect(h.gates[0].opening).toBe(1);
     h.restart();
     expect(h.gates).toHaveLength(2);

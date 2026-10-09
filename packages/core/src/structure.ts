@@ -740,10 +740,10 @@ export function partialStressPlan(shape: VoxelShape): PartialStressPlan | undefi
   const budget = shape.sx * shape.sz * PARTIAL_STRESS_MAX_FRACTION;
   const taken: number[] = [];
   let x0 = Infinity;
+  let yMax = -Infinity;
   let z0 = Infinity;
   let x1 = -Infinity;
   let z1 = -Infinity;
-  let yMax = -Infinity;
 
   for (const c of dirty) {
     const b = shape.chunkBounds(c);
@@ -768,7 +768,7 @@ export function partialStressPlan(shape: VoxelShape): PartialStressPlan | undefi
     z0 = nz0;
     x1 = nx1;
     z1 = nz1;
-    if (b.y1 > yMax) yMax = b.y1;
+    yMax = Math.max(yMax, b.y1);
     taken.push(c);
   }
 
@@ -905,6 +905,10 @@ export function solveBodyStructure(
     if (cfg.stress) {
       const plan = cfg.incremental ? partialStressPlan(shape) : undefined;
       const { failures } = computeStress(shape, cfg, plan?.region);
+      // Partial regions can miss supports outside their boundary. Queue a full
+      // confirmation before deleting overloaded cells; keep the dirty region.
+      // The next structural pass confirms the failure, off the immediate hit path.
+      if (plan && failures.length) { stressCascades.set(shape, shape.solidVoxels); continue; }
       // Массовый разрыв запускает перераспределение нагрузки за пределами
       // задетого чанка. До затухания такой цепочки нужен полный расчёт.
       if (failures.length >= CHUNK_SIZE) stressCascades.set(shape, shape.solidVoxels);
@@ -1068,6 +1072,39 @@ function releaseImpact(fragment: Body, center: Vec3, source: Body): void {
   fragment.wake();
 }
 
+const glassScans = new WeakMap<VoxelShape, number>();
+
+/** Managed bodies (cabins, vehicles, doors) also release disconnected glass. */
+function detachGlass(body: Body, cfg: Required<StructureOptions>): StructureResult {
+  const result: StructureResult = { fragments: [], detachedVoxels: 0, dustVoxels: 0, stressFailures: 0 };
+  for (const shape of body.shapes) {
+    if (glassScans.get(shape) === shape.solidVoxels) continue;
+    let pending = false;
+    if (shape.data.includes(Mat.Glass)) {
+      const anchors = new Uint8Array(shape.volume);
+      for (let i = 0; i < shape.volume; i++) if (shape.data[i] !== Mat.Glass) anchors[i] = 1;
+      // Flood glass groups and retain only those touching a solid frame by a face.
+      for (const component of findLooseComponents(shape, anchors)) {
+        const attached = component.some(index => {
+          const c = shape.coords(index);
+          return isAnchorVoxel(shape, c.x, c.y, c.z) || NEIGHBORS.some(([dx, dy, dz]) => {
+            const mat = shape.get(c.x + dx, c.y + dy, c.z + dz);
+            return mat !== Mat.Air && mat !== Mat.Glass;
+          });
+        });
+        if (attached) continue;
+        if (result.fragments.length >= cfg.maxFragmentsPerStep) { pending = true; break; }
+        const frag = extractFragment(body, shape, component);
+        frag.body.tags.clear(); frag.body.tags.add('debris'); frag.body.tags.add('glass-shard');
+        result.fragments.push({ body: frag.body, mass: frag.mass, center: frag.center, voxels: component.length });
+        result.detachedVoxels += component.length;
+      }
+    }
+    if (!pending) glassScans.set(shape, shape.solidVoxels);
+  }
+  return result;
+}
+
 /**
  * Прогоняет структурный анализ по всем телам мира, у которых накопилась
  * грязная область. Обломки сразу добавляются в мир, и, если после отделения
@@ -1091,7 +1128,16 @@ export function stepStructure(
     if (body.destroyed || body.passive) continue;
     // Обломки разделяем по связности и ударам, без статических нагрузок.
     // Техника управляет собственными узлами и в этот разбор не входит.
-    if (body.kind !== 'static' && !body.tags.has('debris')) continue;
+    const managed = body.kind !== 'static' && !body.tags.has('debris');
+    if (managed) {
+      const res = detachGlass(body, cfg);
+      for (const f of res.fragments) { world.addBody(f.body); total.fragments.push(f); }
+      total.detachedVoxels += res.detachedVoxels;
+      if (res.fragments.length) world.events.emit('body:split', {
+        source: body, fragments: res.fragments.map(f => f.body), reason: 'disconnected',
+      });
+      continue;
+    }
     for (const shape of body.shapes) {
       for (const [index, link] of shape.attachments) {
         const support = world.bodies.get(link.bodyId);

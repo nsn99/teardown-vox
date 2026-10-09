@@ -32,7 +32,7 @@ import {
   stepStructure,
   v3,
 } from '@tvox/core';
-import { ChargeView, ExtinguisherJet, FlameJet, FireLights, ParticleSystem, VoxelRenderer } from '@tvox/render';
+import { ChargeView, ExtinguisherJet, FlameJet, FireLights, SurfaceFlames, ParticleSystem, VoxelRenderer } from '@tvox/render';
 import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
@@ -46,11 +46,13 @@ const mobile = prefersTouch();
 const renderer = new VoxelRenderer({ canvas, quality: mobile ? 'low' : 'medium' });
 const particles = new ParticleSystem({ capacity: 6000 });
 const fireLights = new FireLights(6);
+const surfaceFlames = new SurfaceFlames();
 const extinguisherJet = new ExtinguisherJet();
 const flameJet = new FlameJet();
 let extinguisherHitUntil = 0;
+let throwHeldUntilRelease = false;
 const chargeView = new ChargeView();
-renderer.scene.add(particles.points, fireLights.group, chargeView.group, extinguisherJet.mesh, flameJet.group);
+renderer.scene.add(particles.points, fireLights.group, surfaceFlames.mesh, chargeView.group, extinguisherJet.mesh, flameJet.group);
 const audio = new AudioDirector();
 const player = new AudioPlayer();
 let audioOff: (() => void) | null = null;
@@ -179,6 +181,7 @@ function startRun(inSandbox: boolean, saved?: SessionSave): void {
   particles.clear();
   extinguisherJet.clear();
   flameJet.clear();
+  surfaceFlames.clear();
   extinguisherHitUntil = 0;
   chargeView.update([]);
 
@@ -242,6 +245,7 @@ function toHub(): void {
   paused = true;
   extinguisherJet.clear();
   flameJet.clear();
+  surfaceFlames.clear();
   player.suspend();
   hud.hide();
   input.releaseLock();
@@ -341,10 +345,16 @@ function handleActions(h: Heist): void {
       const messages = { attached: 'Груз зацеплен', released: 'Груз отпущен', empty: 'Подведите крюк ближе к ящику или обломку',
         overweight: 'Груз тяжелее 12 тонн', broken: 'Подъёмный механизм повреждён' };
       hud.message(messages[result], 2);
+    } else if (h.driving?.forklift) {
+      const result = h.driving.forklift.toggle(h.sim);
+      const messages = { attached: 'Груз на вилах · T/Y — поднять/опустить · E — отпустить', released: 'Груз отпущен',
+        empty: 'Подведите опущенные вилы под груз', heavy: 'Груз тяжелее 5 тонн или слишком широкий',
+        moving: 'Остановитесь перед захватом груза', broken: 'Мачта или вилы повреждены' };
+      hud.message(messages[result], 3);
     } else if (h.driving?.deck && h.mission.carriedIds.length === 0) {
       const result = h.driving.deck.toggle(h.sim);
       const messages = { secured: 'Груз закреплён на платформе', released: 'Груз освобождён',
-        empty: 'Опустите груз краном на платформу и нажмите E', moving: 'Остановите грузовик для работы с грузом' };
+        empty: 'Опустите груз на палубу или платформу, освободите захват и нажмите E', moving: 'Остановитесь для работы с грузом' };
       hud.message(messages[result], 2);
     } else {
       const stowed = h.hands.body ? null : h.stow();
@@ -352,7 +362,8 @@ function handleActions(h: Heist): void {
         hud.message(`В кузов: ${h.vehicles.get(stowed)?.spec.name ?? 'техника'}`, 1.5);
       } else {
         const id = h.interact();
-        if (id?.startsWith('body:') || (!id && h.hands.message)) hud.message(h.hands.message, 2);
+        if (id?.startsWith('gate:')) hud.message(touch ? 'Удерживайте «Взять» и тяните створку движением вдоль стены или обзором' : 'Держите E и тяните створку взглядом или движением вдоль стены', 3);
+        else if (id?.startsWith('body:') || (!id && h.hands.message)) hud.message(h.hands.message, 2);
         else if (id) hud.message(h.mission.carriedIds.includes(id) ? 'Взято' : 'Положено', 1.2);
       }
     }
@@ -430,6 +441,12 @@ function handleActions(h: Heist): void {
   }
 
   const primaryPressed = input.take('Mouse0');
+  if (!input.state.firing && !primaryPressed) throwHeldUntilRelease = false;
+  if (primaryPressed && (h.hands.body || h.mission.carriedIds.length)) {
+    h.throwHeld(); throwHeldUntilRelease = true;
+    hud.message('Предмет брошен', 1); return;
+  }
+  if (throwHeldUntilRelease) return;
   const use = h.inventory.active === 'planks' ? primaryPressed : input.state.firing || primaryPressed;
   if (use && !h.operating) {
     const res = h.use();
@@ -511,10 +528,11 @@ function frame(now: number): void {
     const look = input.consumeLook();
     h.yaw += look.yaw;
     h.pitch = clamp(h.pitch + look.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+    if (!input.held('KeyE')) h.releaseGate();
     handleActions(h);
     if (paused) return;
     const vehicle = h.driving;
-    touch?.setMode(h.operating ? 'crane' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle ? 'vehicle' : 'foot');
+    touch?.setMode(h.operating ? 'crane' : vehicle?.forklift ? 'forklift' : vehicle?.spec.kind === 'boat' ? 'boat' : vehicle?.deck ? 'truck' : vehicle?.spec.blade ? 'blade' : vehicle ? 'vehicle' : 'foot');
     touch?.setTool(h.hands.body ? `В руках · ${Math.ceil(h.hands.body.mass())} кг` : TOOLS[h.inventory.active].name);
     touch?.setCarrying(!!h.hands.body || h.mission.carriedIds.length > 0);
     if (vehicle) touch?.setSpeed(Math.abs(vehicle.speed) * 3.6, vehicle.speedLimit);
@@ -526,6 +544,7 @@ function frame(now: number): void {
   }
 
   if (paused) {
+    h.releaseGate();
     player.suspend();
     return;
   }
@@ -538,6 +557,8 @@ function frame(now: number): void {
   if (h.inventory.active !== 'flamethrower') flameJet.clear();
   if (h.inventory.active !== 'extinguisher') extinguisherJet.clear();
   const firePointLimit = { low: 48, medium: 128, high: 256 }[renderer.currentQuality];
+  const allFirePoints = [...h.sim.fire.burningPoints()];
+  surfaceFlames.update(allFirePoints, h.sim.world.time);
   const firePoints = [...h.sim.fire.burningPoints(firePointLimit)];
   fireLights.update(firePoints, h.sim.world.time);
   for (const p of firePoints) {

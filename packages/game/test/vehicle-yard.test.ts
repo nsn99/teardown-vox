@@ -3,7 +3,7 @@ import { Mat, Simulation, v3 } from '@tvox/core';
 import { NEUTRAL_INPUT, Vehicle, VehicleKind, portLevel } from '@tvox/game';
 import { overlapsMaterial, overlapsSolid } from '../src/character.js';
 
-const land: VehicleKind[] = ['car', 'pickup', 'bulldozer', 'excavator', 'truck'];
+const land: VehicleKind[] = ['car', 'pickup', 'bulldozer', 'excavator', 'truck', 'forklift'];
 let sim: Simulation;
 
 function parkVehicles(): Vehicle[] {

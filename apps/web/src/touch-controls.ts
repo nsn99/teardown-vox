@@ -1,7 +1,7 @@
 import { Input } from './input.js';
 import { TOOLS, TOOL_IDS } from '@tvox/game';
 
-export type TouchMode = 'foot' | 'vehicle' | 'blade' | 'truck' | 'boat' | 'crane';
+export type TouchMode = 'foot' | 'vehicle' | 'blade' | 'truck' | 'boat' | 'crane' | 'forklift';
 
 /** Radial dead zone and unit-length diagonal: walking and steering share the same stick. */
 export function stickAxes(dx: number, dy: number, radius: number): { forward: number; right: number } {
@@ -124,7 +124,7 @@ export class TouchControls {
       button.hidden = !visible;
     };
     set('KeyF', foot ? 'Сесть' : 'Выйти');
-    set('KeyE', crane ? 'Зацепить' : mode === 'truck' ? 'Закрепить' : 'Взять');
+    set('KeyE', crane || mode === 'forklift' ? 'Зацепить' : mode === 'truck' || mode === 'boat' ? 'Закрепить' : 'Взять');
     set('Mouse0', 'Действие', foot);
     set('Mouse2', 'Подрыв', foot);
     set('Space', crane ? 'Крюк ↑' : 'Прыжок', foot || crane);
@@ -132,11 +132,13 @@ export class TouchControls {
     const brake = this.root.querySelector<HTMLButtonElement>('[data-main-brake]')!;
     brake.hidden = foot;
     brake.textContent = crane ? 'Крюк ↓' : 'Тормоз';
-    set('KeyG', 'Выгрузить', mode === 'truck');
+    set('KeyG', 'Выгрузить', mode === 'truck' || mode === 'boat');
     set('KeyU', 'На колёса', !foot && !crane && mode !== 'boat');
     this.root.querySelector<HTMLElement>('.touch-tool-picker')!.hidden = !foot;
     this.root.querySelector<HTMLElement>('.touch-speed')!.hidden = foot || crane;
-    this.root.querySelector<HTMLElement>('.touch-lift')!.hidden = mode !== 'blade';
+    this.root.querySelector<HTMLElement>('.touch-lift')!.hidden = mode !== 'blade' && mode !== 'forklift';
+    this.root.querySelector<HTMLElement>('.touch-lift [data-code="KeyT"]')!.textContent = mode === 'forklift' ? 'Вилы ↑' : 'Ковш ↑';
+    this.root.querySelector<HTMLElement>('.touch-lift [data-code="KeyY"]')!.textContent = mode === 'forklift' ? 'Вилы ↓' : 'Ковш ↓';
     this.stick.querySelector('small')!.textContent = crane ? 'Поворот / стрела' : foot ? 'Движение' : 'Руль / газ';
   }
 
@@ -149,7 +151,8 @@ export class TouchControls {
   setCarrying(holding: boolean): void {
     if (this.mode !== 'foot') return;
     this.root.querySelector<HTMLElement>('.touch-actions [data-code="KeyE"]')!.textContent = holding ? 'Положить' : 'Взять';
-    this.root.querySelector<HTMLButtonElement>('.touch-primary')!.hidden = holding;
+    const action = this.root.querySelector<HTMLButtonElement>('.touch-primary')!;
+    action.hidden = false; action.textContent = holding ? 'Бросить' : 'Действие';
   }
 
   setSpeed(kmh: number, limit: number): void {

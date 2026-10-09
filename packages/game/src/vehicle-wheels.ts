@@ -17,10 +17,10 @@ export function wheelPose(wheel: VehicleWheel, steering: number, roll: number): 
   return { position: sub(wheel.center, rotateVec(rotation, half)), rotation };
 }
 
-export function buildVehicleWheels(kind: 'car' | 'pickup' | 'truck', voxelSize: number, size: Vec3): VehicleWheel[] {
+export function buildVehicleWheels(kind: 'car' | 'pickup' | 'truck' | 'forklift', voxelSize: number, size: Vec3): VehicleWheel[] {
   const diameter = kind === 'car' ? 7 : kind === 'truck' ? 10 : 8;
   const radius = diameter * voxelSize / 2;
-  const axle = kind === 'car' ? [8.5, 30.5] : kind === 'truck' ? [13, 27, 81] : [9.5, 36.5];
+  const axle = kind === 'car' ? [8.5, 30.5] : kind === 'truck' ? [13, 27, 81] : kind === 'forklift' ? [6, 25] : [9.5, 36.5];
   const wheels: VehicleWheel[] = [];
   for (const [axleIndex, x] of axle.entries()) for (const z of [1.5, size.z - 1.5]) {
     const shape = new VoxelShape({ sx: diameter, sy: diameter, sz: 3, voxelSize, name: `${kind}-wheel` });
@@ -30,7 +30,7 @@ export function buildVehicleWheels(kind: 'car' | 'pickup' | 'truck', voxelSize: 
       const r = Math.hypot(dx, dy);
       if (r > diameter / 2) continue;
       for (let z = 0; z < 3; z++) {
-        shape.set(x, y, z, Mat.Metal);
+        shape.set(x, y, z, r < diameter * .28 ? Mat.Metal : Mat.Rubber);
         const rim = r < diameter * 0.28 && z !== 1;
         const spoke = rim && (Math.abs(dx) < 0.6 || Math.abs(dy) < 0.6);
         const tread = !rim && Math.floor((Math.atan2(dy, dx) + Math.PI) * 8 / Math.PI) % 2 === 0;
@@ -41,7 +41,7 @@ export function buildVehicleWheels(kind: 'car' | 'pickup' | 'truck', voxelSize: 
       }
     }
     const center = v3((x - size.x / 2) * voxelSize, radius, (z - size.z / 2) * voxelSize);
-    const wheel: VehicleWheel = { shape, center, radius, steering: axleIndex === axle.length - 1,
+    const wheel: VehicleWheel = { shape, center, radius, steering: kind === 'forklift' ? axleIndex === 0 : axleIndex === axle.length - 1,
       pose: { position: v3(), rotation: quatFromEulerYXZ(0, 0) } };
     wheel.pose = wheelPose(wheel, 0, 0);
     shape.transform = { position: { ...wheel.pose.position }, rotation: { ...wheel.pose.rotation } };

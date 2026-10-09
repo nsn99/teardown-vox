@@ -5,3 +5,5 @@ export * from './mesher-pool.js';
 export * from './scene.js';
 export * from './effects.js';
 export * from './charges.js';
+
+export * from './surface-flames.js';

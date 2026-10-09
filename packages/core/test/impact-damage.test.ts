@@ -7,6 +7,23 @@ function block(size: number, material: Mat) {
 }
 
 describe('размер повреждения от падения зависит от предмета', () => {
+  it('стальная рама с высоты 35 см не взрывает пол и соседнюю стену', async () => {
+    const world = new VoxelWorld();
+    const floor = new VoxelShape({ sx: 60, sy: 8, sz: 60, voxelSize: .1 }); floor.fill({}, Mat.Concrete);
+    floor.transform.position = v3(-3, -.8, -3); floor.structural = false;
+    world.addBody(new Body({ shapes: [floor] }));
+    const wall = new VoxelShape({ sx: 40, sy: 30, sz: 2, voxelSize: .1 }); wall.fill({}, Mat.Brick);
+    wall.transform.position = v3(-2, 0, .6); world.addBody(new Body({ shapes: [wall] }));
+    const beam = new VoxelShape({ sx: 40, sy: 3, sz: 3, voxelSize: .1, grounded: false }); beam.fill({}, Mat.HeavyMetal);
+    world.addBody(new Body({ kind: 'dynamic', tags: ['debris'], shapes: [beam],
+      transform: { position: v3(-2, .35, 0), rotation: { x: 0, y: 0, z: 0, w: 1 } } }));
+    const before = [floor.solidVoxels, wall.solidVoxels], physics = await RapierPhysics.create(world);
+    try {
+      for (let i = 0; i < 180; i++) physics.step(1 / 60);
+      expect([floor.solidVoxels, wall.solidVoxels]).toEqual(before);
+    } finally { physics.dispose(); }
+  });
+
   it('масса, размер и скорость увеличивают область и силу удара', () => {
     const light = impactDamage(block(6, Mat.Wood), 8), heavy = impactDamage(block(6, Mat.Metal), 8);
     const large = impactDamage(block(12, Mat.Metal), 8), slow = impactDamage(block(6, Mat.Metal), 3);

@@ -1,3 +1,4 @@
+import { slideGate } from './helpers/manual-gate.js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Aabb, Body, Mat, RapierPhysics, Simulation, VoxelShape, v3 } from '@tvox/core';
 import { AutomaticGate, DEFAULT_INPUT, Heist, NEUTRAL_INPUT, Vehicle, VehicleKind, buildPlank, portLevel } from '@tvox/game';
@@ -245,6 +246,7 @@ describe('проезд в склад порта', () => {
       } finally { vehicle.body.destroyed = false; }
     };
     try {
+      slideGate(h.gates[0], h.gates[0].def.rise);
       for (let i = 0; i < 70; i++) h.update(DT);
       expect(h.gates[0].opening).toBe(1);
       for (let i = 0; i < 800 && vehicle.position.z < 20; i++) {
@@ -266,22 +268,17 @@ describe('проезд в склад порта', () => {
     } finally { vehicle.body.destroyed = false; }
   }, 60_000);
 
-  it('на настоящей карте порта доска поперёк рамы удерживает створку', () => {
+  it('ручная створка на карте упирается в доску и не закрывается сквозь неё', () => {
     const gate = h.gates[0];
-    const near = { min: v3(15.5, 0.1, 10), max: v3(16.5, 1.8, 11) };
-    const far = { min: v3(-30, 0.1, -30), max: v3(-29, 1.8, -29) };
-    tick(gate, near, 1.1);
+    slideGate(gate, gate.def.rise);
     expect(gate.opening).toBe(1);
-    const plank = buildPlank(h.sim.world, v3(13.9, 1.5, 13.75), v3(18.1, 1.5, 13.75))!;
+    const plank = buildPlank(h.sim.world, v3(17, 1.5, 12.8), v3(17, 1.5, 14.2))!;
     try {
-      for (let i = 0; i < 360; i++) {
-        gate.update(far, DT);
-        expect(gate.body.aabb().min.y).toBeGreaterThanOrEqual(plank.aabb().max.y - 0.001);
-      }
-      expect(gate.opening).toBeLessThan(1);
+      slideGate(gate, 0);
+      expect(gate.opening).toBeGreaterThan(0);
+      expect(gate.body.aabb().min.x).toBeGreaterThanOrEqual(plank.aabb().max.x - .001);
       h.sim.world.removeBody(plank);
-      tick(gate, far, 5);
-      expect(gate.opening).toBe(0);
+      slideGate(gate, 0); expect(gate.opening).toBe(0);
     } finally { h.sim.world.removeBody(plank); }
   }, 60_000);
 });

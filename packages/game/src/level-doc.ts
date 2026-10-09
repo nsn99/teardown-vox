@@ -127,7 +127,7 @@ export type GateDoc = Omit<GateDef, 'support'> & {
 };
 type CranePartDoc = Omit<CranePartDef, 'pivot' | 'anchors'> & { pivot: Vec3Doc; anchors: Vec3Doc[] };
 export type CraneDoc = Omit<CraneDef, 'base' | 'house' | 'boom' | 'hook' | 'stay' | 'tip' | 'cab'> & {
-  base: { volume: string; anchors: Vec3Doc[] };
+  base: { volume: string; anchors: Vec3Doc[]; legBottom?: number; legRadius?: number };
   house: CranePartDoc;
   boom: CranePartDoc & { support: Vec3Doc[] };
   hook: CranePartDoc;
@@ -751,7 +751,9 @@ function parseCrane(value: unknown, path: string, volumes: VolumeDoc[], props: P
   const maxAngle = positive(o.maxAngle, 'maxAngle');
   if (minAngle > angle || angle > maxAngle || maxAngle >= Math.PI / 2) fail(`${path}.angle`, 'углы стрелы должны лежать между 0 и π/2');
   return { id: str(o.id, `${path}.id`), name: str(o.name, `${path}.name`),
-    base: { volume: volume.name, anchors: anchors(baseRaw.anchors, 'base.anchors', volume) }, house,
+    base: { volume: volume.name, anchors: anchors(baseRaw.anchors, 'base.anchors', volume),
+      ...(baseRaw.legBottom !== undefined ? { legBottom: int(baseRaw.legBottom, `${path}.base.legBottom`, 0) } : {}),
+      ...(baseRaw.legRadius !== undefined ? { legRadius: int(baseRaw.legRadius, `${path}.base.legRadius`, 1) } : {}) }, house,
     boom: { ...boom, support: anchors(object('boom').support, 'boom.support', houseVolume) }, hook, ropes,
     stay: { body: stayProp.name, from: vec3(stayRaw.from, `${path}.stay.from`), to: vec3(stayRaw.to, `${path}.stay.to`) },
     tip: vec3(o.tip, `${path}.tip`),
@@ -768,6 +770,8 @@ function parseGate(v: unknown, path: string): GateDoc {
     if (n <= 0) fail(`${path}.${field}`, 'ожидалось положительное число');
     return n;
   };
+  if (o.axis !== undefined && !['x', 'y', 'z'].includes(String(o.axis))) fail(`${path}.axis`, 'ожидалась ось x, y или z');
+  if (o.manual !== undefined && typeof o.manual !== 'boolean') fail(`${path}.manual`, 'ожидалось логическое значение');
   const closeDelay = num(o.closeDelay, `${path}.closeDelay`);
   if (closeDelay < 0) fail(`${path}.closeDelay`, 'ожидалось неотрицательное число');
   let support: GateDoc['support'];
@@ -778,7 +782,8 @@ function parseGate(v: unknown, path: string): GateDoc {
   }
   return { id: str(o.id, `${path}.id`), body: str(o.body, `${path}.body`),
     rise: positive('rise'), speed: positive('speed'), approachRadius: positive('approachRadius'),
-    closeDelay, ...(support ? { support } : {}) };
+    closeDelay, ...(o.manual !== undefined ? { manual: Boolean(o.manual) } : {}),
+    ...(o.axis !== undefined ? { axis: o.axis as 'x' | 'y' | 'z' } : {}), ...(support ? { support } : {}) };
 }
 
 function parseRoute(v: unknown, path: string): RouteDoc {

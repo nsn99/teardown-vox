@@ -110,8 +110,13 @@ export class Hud {
     const vehicle = heist.driving;
     if (vehicle?.deck) {
       this.crane.hidden = false;
-      this.crane.textContent = `ГРУЗОВИК · закреплено грузов: ${vehicle.deck.count}\n` +
-        'Опустите груз между жёлтыми метками платформы\nE — закрепить/освободить · G — освободить груз · U — на колёса · F — выйти';
+      this.crane.textContent = `${vehicle.spec.kind === 'boat' ? 'КАТЕР' : 'ГРУЗОВИК'} · закреплено грузов: ${vehicle.deck.count}\n` +
+        (vehicle.spec.kind === 'boat' ? 'Опустите сейф на кормовую палубу и отведите вилы\n' : 'Опустите груз между жёлтыми метками платформы\n') +
+        'E — закрепить/освободить · G — освободить груз · F — выйти';
+    } else if (vehicle?.forklift) {
+      this.crane.hidden = false;
+      this.crane.textContent = `ПОГРУЗЧИК · до 5 тонн\n${vehicle.forklift.load ? 'Груз: ' + vehicle.forklift.load.name : 'Подведите опущенные вилы под груз'}\n` +
+        'T/Y — вилы вверх/вниз · E — взять/отпустить · F — выйти';
     } else if (vehicle?.spec.blade) {
       this.crane.hidden = false;
       this.crane.textContent = `${vehicle.spec.name.toUpperCase()}\nКовш работает при движении · T/Y — высота · [/] — скорость · Ctrl — тормоз · U — на колёса · F — выйти`;

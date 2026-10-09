@@ -1,4 +1,4 @@
-import { Aabb, Body, Simulation, Vec3, aabbOverlaps, add, bodySolidBounds, distance, scale, sub, v3 } from '@tvox/core';
+import { Aabb, Body, Simulation, Vec3, normalize, aabbOverlaps, add, bodySolidBounds, distance, scale, sub, v3 } from '@tvox/core';
 import { overlapsSolid } from './character.js';
 
 /** Gameplay limits for one person, including awkward but light objects. */
@@ -32,7 +32,7 @@ export class HandCarry {
     this.body = b;
     b.kind = 'dynamic'; b.kinematic = true; b.velocity = v3(); b.angularVelocity = v3(); b.wake();
     sim.physics.sync(b);
-    this.message = `В руках: ${Math.ceil(b.mass())} кг · E — положить`;
+    this.message = `В руках: ${Math.ceil(b.mass())} кг · E — положить · ЛКМ — бросить`;
     return true;
   }
 
@@ -63,6 +63,17 @@ export class HandCarry {
     if (b) { b.kinematic = false; b.velocity = v3(); b.angularVelocity = v3(); b.velocityDirty = true; b.wake(); sim.physics.sync(b); }
     this.message = 'Предмет отпущен';
     return b;
+  }
+
+  throw(sim: Simulation, direction: Vec3, inherited = v3()): Body | null {
+    const body = this.drop(sim);
+    if (!body) return null;
+    // One person's finite effort: a brick flies faster than a 30 kg crate.
+    const speed = Math.min(9, Math.sqrt(240 / Math.max(.5, body.mass())));
+    body.velocity = add(inherited, scale(normalize(direction), speed));
+    body.angularVelocity = v3(1.2, .5, -.8); body.velocityDirty = true; body.wake(); sim.physics.sync(body);
+    this.message = 'Предмет брошен';
+    return body;
   }
 
   snapshot(): number | null { return this.body?.id ?? null; }

@@ -26,6 +26,8 @@ export interface GateDef {
   id: string;
   /** Имя отдельного кинематического тела створки. */
   body: string;
+  manual?: boolean;
+  axis?: 'x' | 'y' | 'z';
   rise: number;
   speed: number;
   approachRadius: number;
@@ -44,7 +46,7 @@ export interface CranePartDef {
 export interface CraneDef {
   id: string;
   name: string;
-  base: { volume: string; anchors: Vec3[] };
+  base: { volume: string; anchors: Vec3[]; legBottom?: number; legRadius?: number };
   house: CranePartDef;
   boom: CranePartDef & { support: Vec3[] };
   hook: CranePartDef;
