@@ -36,7 +36,7 @@ describe('управляемый ковш тяжёлой техники', () => 
     const chips = sim.world.dynamicBodies.filter(body => body.tags.has('carved-debris'));
     expect(chips.some(body => body.shapes.some(shape => [...shape.paint.values()].some(color => color >= 0x1000000)))).toBe(true);
     expect(vehicle.position.y).toBeCloseTo(0.02, 5);
-  }, 30_000);
+  }, 120_000);
 
   it('бульдозер режет склад на высоте ковша, но кабина останавливается перед оставшейся стеной', () => {
     const sim = new Simulation(); const level = portLevel.build(sim)[0];
@@ -49,5 +49,5 @@ describe('управляемый ковш тяжёлой техники', () => 
     expect(warehouse.data.slice(warehouse.sx * warehouse.sz * 25)).toEqual(above); expect(vehicle.position.x).toBeGreaterThan(26);
     expect(vehicle.position.y).toBeGreaterThanOrEqual(0.02);
     expect(vehicle.position.y).toBeLessThan(0.4);
-  }, 30_000);
+  }, 120_000);
 });

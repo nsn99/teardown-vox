@@ -51,7 +51,7 @@ describe('сохранение сессии', () => {
     // A checkpoint remains independent of subsequent gameplay and round-trips again.
     wall.fill({}, Mat.Air); expect(save.bodies.flatMap(b => b.shapes).find(s => s.id === wall.id)!.json!.rle.length).toBeGreaterThan(1);
     const again = loader.capture(); expect(again.drivingId).toBe('cargo-truck');
-  }, 30_000);
+  }, 120_000);
 
   it('сохраняет таймер миссии, заряд с бесконечным фитилём, ворота, триггеры и позицию крановщика', () => {
     const { h, checkpoint } = scene(false);
@@ -75,7 +75,7 @@ describe('сохранение сессии', () => {
     expect(restored.operatingId).toBeNull();
     const before = restored.mission.timeLeft; restored.update(.1);
     expect(restored.mission.timeLeft).toBeLessThan(before);
-  }, 30_000);
+  }, 120_000);
 
   it('отклоняет сохранение другой карты до изменения мира', () => {
     const { h, checkpoint } = scene(); const saved = checkpoint.capture();

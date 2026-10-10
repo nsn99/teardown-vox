@@ -21,5 +21,8 @@ export default defineConfig({
   test: {
     include: ['packages/game/test/perf.test.ts'],
     environment: 'node',
+    // Срок включает сборку сцены и весь цикл замеров; бюджеты отдельных
+    // операций остаются в perf.test.ts и проверяются без покрытия.
+    testTimeout: 120_000,
   },
 });

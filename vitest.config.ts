@@ -17,6 +17,11 @@ export default defineConfig({
     // тот же меш считается вчетверо дольше, и мерить там нечего.
     exclude: ['packages/game/test/perf.test.ts', '**/node_modules/**', '**/dist/**'],
     environment: 'node',
+    // Vitest 4 проверяет срок даже синхронных тестов. Построение и загрузка
+    // полной карты под покрытием занимают десятки секунд на раннере CI.
+    // Скорость кадра проверяется отдельно, без инструментовки покрытия.
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],

@@ -36,4 +36,4 @@ it('сейф с вил опускается на корму, закрепляе�
     boat.body.shapes[0].fill({ x0: 1, x1: 18, y0: 0, y1: 8, z0: 0, z1: 22 }, Mat.Air);
     boat.deck!.update(h.sim, false); expect(safe.kinematic).toBe(false);
   } finally { h.sim.dispose(); }
-}, 30_000);
+}, 120_000);

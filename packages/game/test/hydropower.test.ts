@@ -32,7 +32,7 @@ describe('ГЭС, электропитание и реальный паводо�
     h.pursuit.update(h.sim, .1, { alarmActive: true, timeLeft: 10, finished: false }, v3(60, 1.4, -30));
     const patrol = h.pursuit.chasers.find(c => c.spec.kind === 'boat')!;
     expect(patrol.active).toBe(true); expect(patrol.position.y).toBeCloseTo(1.4);
-  }, 30_000);
+  }, 120_000);
 
   it('центральный пролёт падает в канал в Rapier, образуя реальный разрыв дороги', async () => {
     const h = scene(); h.sim.setPhysics(await RapierPhysics.create(h.sim.world));
@@ -45,7 +45,7 @@ describe('ГЭС, электропитание и реальный паводо�
     expect(center.aabb().min.y).toBeLessThan(initial - .5);
     const road = h.sim.world.raycast(v3(-54, 1.5, 38), v3(0, -1, 0), { maxDistance: 1, filter: m => m !== Mat.Water });
     expect(road).toBeNull();
-  }, 30_000);
+  }, 120_000);
 
   it('потеря рабочего узла отключает мотор крана; тормоз, выход и ручные ворота работают', () => {
     const h = scene(); const c = h.cranes.get('port-crane')!;
@@ -57,7 +57,7 @@ describe('ГЭС, электропитание и реальный паводо�
     expect(c.operable).toBe(true); h.toggleCrane(); expect(h.operating).toBeNull();
     expect(h.gates.every(g => g.def.manual)).toBe(true);
     expect(h.hydro!.level).toBeCloseTo(-.4);
-  }, 30_000);
+  }, 120_000);
 
   it('поднимает катер, затапливает берег, тушит огонь и физически отделяет мост, сохраняя дорогу', () => {
     const h = scene(); const boat = h.vehicles.get('boat')!;
@@ -81,7 +81,7 @@ describe('ГЭС, электропитание и реальный паводо�
       const hit = h.sim.world.raycast(v3(p.x, 3, p.z), v3(0, -1, 0), { maxDistance: 1, filter: m => m !== Mat.Water });
       expect(hit?.point.y).toBeCloseTo(2.4);
     }
-  }, 30_000);
+  }, 120_000);
 
   it('сохраняет ход паводка и обломки, не продвигает время при загрузке или паузе', () => {
     const h = scene(), checkpoint = new SessionCheckpoint(h);
@@ -97,5 +97,5 @@ describe('ГЭС, электропитание и реальный паводо�
     const count = legacy.sim.world.totalSolidVoxels();
     expect(() => new SessionCheckpoint(legacy).restore(saved)).toThrow('Несовместимое');
     expect(legacy.sim.world.totalSolidVoxels()).toBe(count);
-  }, 30_000);
+  }, 120_000);
 });

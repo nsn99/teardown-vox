@@ -124,7 +124,7 @@ describe('пути отхода порта', () => {
       ).toBe(`${r.name}: прошёл`);
       expect(res.t).toBeLessThan(alarm);
     }
-  }, 300000);
+  }, 600_000);
 
   it('каждый маршрут заканчивается в зоне эвакуации', () => {
     const ex = portLevel.mission.extraction;
@@ -266,7 +266,7 @@ describe('задачи, которые решаются не ногами', () =
     ).toBe('по доске: поднялся');
     // И оказался наверху, а не обошёл понизу.
     expect(h.character.position.y).toBeGreaterThan(2);
-  }, 300000);
+  }, 600_000);
 });
 
 function aim(h: Heist, at: Vec3): void {

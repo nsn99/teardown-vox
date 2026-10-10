@@ -403,33 +403,78 @@ try {
   });
 
   await step('дым садит видимость и рассеивается', async () => {
-    // Дым — данные, а не спрайты: проверяем это тем же способом, что и
-    // свет. Задымляем воздух перед камерой и смотрим, что кадр сел.
-    // Наружу, на открытое место: в тёмном зале туман мерить бессмысленно,
-    // там и без дыма ничего не видно дальше десяти метров.
-    await page.evaluate(() => window.tvox.look(24, 1.7, 13, 0, -0.05));
+    // Чистый кадр не должен содержать пыль от предыдущих взрывов.
+    // Ставим игрока на землю, чтобы падение не меняло камеру между кадрами.
+    await page.evaluate(() => {
+      window.tvox.look(24, 0.05, 13, 0, -0.05);
+      window.tvox.heist.sim.smoke.clear();
+      window.tvox.particles.clear();
+    });
     await settleMesh(page, 'открытого места');
-    const clear = await meanLuminance(await page.screenshot({ type: 'png' }));
+    await page.evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const clearFar = await page.evaluate(() => window.tvox.renderer.scene.fog.far);
+    // Область сцены без счётчиков и панели инструментов.
+    const smokeClip = { x: 256, y: 170, width: 512, height: 280 };
+    const clear = await page.screenshot({
+      path: join(outDir, '06-clear.png'), type: 'png', clip: smokeClip,
+    });
 
-    const cells = await page.evaluate(() => {
+    // Источник работает до снимка: единичное облако успевало подняться
+    // выше камеры, пока программный WebGL готовил скриншот.
+    const source = await page.evaluate(() => {
+      const emit = () => {
+        const h = window.tvox.heist, eye = h.eye, d = h.aimDirection;
+        for (let distance = 0; distance <= 12; distance++) {
+          for (let side = -2; side <= 2; side++) {
+            for (let up = -1; up <= 2; up++) {
+              h.sim.smoke.emit({
+                x: eye.x + d.x * distance + d.z * side,
+                y: eye.y + d.y * distance + up,
+                z: eye.z + d.z * distance - d.x * side,
+              }, 1);
+            }
+          }
+        }
+      };
+      emit();
+      return setInterval(emit, 100);
+    });
+    let change;
+    try {
+      await page.waitForFunction(far => window.tvox.renderer.scene.fog.far < far * 0.5,
+        clearFar, { timeout: 15000 });
+      const hazy = await page.screenshot({
+        path: join(outDir, '06-hazy.png'), type: 'png', clip: smokeClip,
+      });
+      change = await imageDifference(clear, hazy);
+      const fog = await page.evaluate(() => ({ cells: window.tvox.heist.sim.smoke.size,
+        far: window.tvox.renderer.scene.fog.far }));
+      steps.push(`дым: ${fog.cells} ячеек, дальность ${clearFar.toFixed(1)} → ${fog.far.toFixed(1)} м, ` +
+        `изменение изображения ${change.toFixed(4)}`);
+      if (change < 0.01) throw new Error(`Дым ничего не изменил: ${change.toFixed(4)}`);
+      await page.screenshot({ path: join(outDir, '06-smoke.png') });
+    } finally {
+      await page.evaluate(id => clearInterval(id), source).catch(() => {});
+    }
+
+    const remaining = await page.evaluate(() => {
       const smoke = window.tvox.heist.sim.smoke;
-      for (let i = 0; i < 600; i++) {
-        smoke.emit({ x: 18 + (i % 14), y: 1 + ((i / 14) % 5), z: 3 + ((i / 70) % 10) }, 1);
-      }
+      smoke.step(60);
+      window.tvox.particles.clear();
       return smoke.size;
     });
-    if (cells <= 0) throw new Error('Дым не встал');
-    await page.waitForTimeout(700);
-    const hazy = await meanLuminance(await page.screenshot({ type: 'png' }));
-    await page.screenshot({ path: join(outDir, '06-smoke.png') });
-
-    if (clear < 0) {
-      steps.push('дым: замер пропущен, нет графической библиотеки');
-      return;
-    }
-    steps.push(`дым: ${cells} ячеек, яркость ${clear.toFixed(4)} → ${hazy.toFixed(4)}`);
-    if (Math.abs(hazy - clear) < 0.01) {
-      throw new Error(`Дым ничего не изменил: ${clear.toFixed(4)} → ${hazy.toFixed(4)}`);
+    if (remaining !== 0) throw new Error(`За 60 секунд дым не рассеялся: ${remaining} ячеек`);
+    await page.waitForFunction(far => window.tvox.renderer.scene.fog.far >= far,
+      clearFar, { timeout: 15000 });
+    const recovered = await page.screenshot({
+      path: join(outDir, '06-dispersed.png'), type: 'png', clip: smokeClip,
+    });
+    const residual = await imageDifference(clear, recovered);
+    steps.push(`после рассеивания: ${remaining} ячеек, отличие от чистого кадра ${residual.toFixed(4)}`);
+    if (residual >= change * 0.5) {
+      throw new Error(`Картинка не восстановилась после дыма: ${residual.toFixed(4)}`);
     }
   });
 
@@ -624,6 +669,29 @@ async function meanLuminance(png) {
     sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
   }
   return sum / total / 255;
+}
+
+/** Средняя абсолютная разница яркости соответствующих пикселей, 0..1. */
+async function imageDifference(before, after) {
+  const { createCanvas, loadImage } = await tryCanvas();
+  if (!createCanvas) throw new Error('Для сравнения изображений дыма требуется canvas');
+  const images = await Promise.all([loadImage(before), loadImage(after)]);
+  if (images[0].width !== images[1].width || images[0].height !== images[1].height) {
+    throw new Error('Для сравнения нужны изображения одного размера');
+  }
+  const pixels = images.map(img => {
+    const canvas = createCanvas(img.width, img.height), ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, img.width, img.height).data;
+  });
+  let difference = 0, total = 0;
+  for (let i = 0; i < pixels[0].length; i += 4 * 7) {
+    difference += Math.abs((pixels[0][i] - pixels[1][i]) * 0.299 +
+      (pixels[0][i + 1] - pixels[1][i + 1]) * 0.587 +
+      (pixels[0][i + 2] - pixels[1][i + 2]) * 0.114);
+    total++;
+  }
+  return difference / total / 255;
 }
 
 async function tryCanvas() {

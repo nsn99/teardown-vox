@@ -55,7 +55,7 @@ describe('грузовик под кран', () => {
       cargo.velocity = v3();
       expect(truck.deck!.toggle(h.sim)).toBe('secured'); expect(cargo.tags.has('truck-load')).toBe(true);
     } finally { h.sim.dispose(); }
-  }, 30_000);
+  }, 120_000);
   it('в порту есть грузовик с открытой платформой и шестью колёсами', () => {
     const spawn = portLevel.vehicles.find(v => v.kind === 'truck')!; expect(spawn).toBeDefined();
     const truck = new Vehicle('truck', { position: spawn.position }); const hull = truck.body.shapes[0];

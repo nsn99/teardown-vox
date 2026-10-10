@@ -50,5 +50,5 @@ describe('падение склада после удаления всех оп�
       expect(highRoof(pieces)).toBeLessThan(roofBefore * 0.25);
       expect(gates[0].body.kinematic).toBe(false);
     } finally { sim.dispose(); }
-  }, 60_000);
+  }, 120_000);
 });

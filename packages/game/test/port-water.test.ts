@@ -4,7 +4,7 @@ import { NEUTRAL_INPUT, Vehicle, cameraUnderwater, portLevel } from '@tvox/game'
 
 describe('акватория возле крана и расширенной площадки', () => {
   let sim: Simulation;
-  beforeAll(() => { sim = new Simulation(); portLevel.build(sim); }, 30_000);
+  beforeAll(() => { sim = new Simulation(); portLevel.build(sim); }, 120_000);
 
   it.each([v3(30, -0.5, -35), v3(60, -0.5, -20), v3(90, -0.5, -20), v3(-20, -0.5, -20)])(
     'за прежней границей в точке %j есть вода и морское дно', position => {

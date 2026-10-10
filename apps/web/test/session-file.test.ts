@@ -20,7 +20,7 @@ describe('перенос сохранения в файл', () => {
       expect(sessionKey(copy)).not.toBe(sessionKey({ ...copy, sandbox: false }));
       expect(sessionKey(copy)).not.toBe(sessionKey({ ...copy, mapRevision: 'new-map' }));
     } finally { h.sim.dispose(); }
-  }, 30_000);
+  }, 120_000);
   it('не принимает посторонний файл или неверную версию', () => {
     expect(() => decodeSession('{}')).toThrow();
     expect(() => decodeSession('{"format":"tvox-session","version":2}')).toThrow();

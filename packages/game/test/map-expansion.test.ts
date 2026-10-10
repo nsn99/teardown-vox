@@ -5,7 +5,7 @@ import { CharacterController, EXPANDED_PORT_DOC, PORT_DOC, RING_ROAD, TUNNEL_BRA
 
 describe('расширение карты вокруг сохранённого порта', () => {
   let sim: Simulation;
-  beforeAll(() => { sim = new Simulation(); expandedPortLevel.build(sim); }, 30_000);
+  beforeAll(() => { sim = new Simulation(); expandedPortLevel.build(sim); }, 120_000);
   afterAll(() => sim.dispose());
   const top = (x: number, z: number) => sim.world.raycast(v3(x, 20, z), v3(0, -1, 0),
     { maxDistance: 40, filter: m => m !== Mat.Water });

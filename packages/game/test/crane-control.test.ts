@@ -107,7 +107,7 @@ describe('управление портовым краном', () => {
     expect(box.tags.has('crane-load')).toBe(false);
     for (let i = 0; i < 45; i++) h.sim.step(1 / 60);
     expect(box.aabb().min.y).toBeLessThan(before - .5);
-  }, 45_000);
+  }, 120_000);
 
   it('останавливает груз над землёй и позволяет поднять его после остановки', () => {
     const c = scene();

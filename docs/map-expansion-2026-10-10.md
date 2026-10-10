@@ -55,7 +55,7 @@ node tools/serve-build.mjs 4173
 npm ci
 npm run typecheck
 npm run lint
-npx vitest run --pool=forks --maxWorkers=2 --minWorkers=1
+npx vitest run --pool=forks --maxWorkers=2
 npm run build --workspace apps/web
 ```
 
