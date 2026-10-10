@@ -904,6 +904,7 @@ export class Vehicle {
   }
 
   private senseWater(sim: Simulation): void {
+    if (sim.world.waterSurface) { this.waterSurface = sim.world.waterSurface(this.position); return; }
     const finiteWater = [...sim.world.bodies.values()].some(body => !body.destroyed && body.tags.has('water'));
     if (!finiteWater) { this.waterSurface = this.waterLevel; return; }
     const origin = v3(this.position.x, Math.max(this.position.y + 0.2, this.waterLevel + 0.2), this.position.z);

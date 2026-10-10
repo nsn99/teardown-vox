@@ -136,7 +136,9 @@ export class CharacterController {
       this.crouching = wantCrouch;
     }
 
-    this.inWater = overlapsMaterial(world, this.aabbAt(this.position), Mat.Water);
+    const surface = world.waterSurface?.(this.position);
+    this.inWater = world.waterSurface ? surface !== null && surface !== undefined && this.position.y < surface
+      : overlapsMaterial(world, this.aabbAt(this.position), Mat.Water);
 
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);

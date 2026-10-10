@@ -23,6 +23,7 @@
     "issues:plan": "node tools/issues/sync-issues.mjs --dry-run",
     "issues:sync": "node tools/issues/sync-issues.mjs",
     "smoke": "npm run build --workspace apps/web && node tools/smoke/run.mjs",
+    "smoke:map": "npm run build --workspace apps/web && node tools/smoke/map-expansion.mjs",
     "states": "node tools/states/record.mjs"
   },
   "devDependencies": {

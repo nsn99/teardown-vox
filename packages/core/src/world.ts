@@ -62,6 +62,8 @@ export class VoxelWorld {
   seed: number;
   /** Отработанное время симуляции, секунды. */
   time = 0;
+  /** Optional finite, live water field supplied by a level. null means dry land. */
+  waterSurface?: (position: Vec3) => number | null;
 
   private shapeIndex = new Map<number, Body>();
 

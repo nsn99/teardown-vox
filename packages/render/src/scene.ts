@@ -225,6 +225,7 @@ export class VoxelRenderer {
   private sky = new SkyLightField();
   private hemi: THREE.HemisphereLight;
   private levelLights: THREE.Object3D[] = [];
+  private gridPowered = true;
   private mountedLights: Array<{ def: LevelLight; light: THREE.Light; target?: THREE.Object3D }> = [];
   /** Лампы с неподвижной тенью: обновляются по перестройке геометрии. */
   private staticShadows: THREE.SpotLight[] = [];
@@ -552,6 +553,11 @@ export class VoxelRenderer {
     }
   }
 
+  setGridPower(powered: boolean): void {
+    this.gridPowered = powered;
+    for (const light of this.levelLights) light.visible = powered;
+  }
+
   resize(width: number, height: number): void {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -672,7 +678,7 @@ export class VoxelRenderer {
     const started = performance.now();
     for (const { def, light, target } of this.mountedLights) {
       const body = [...world.bodies.values()].find(b => b.name === def.body && !b.destroyed);
-      light.visible = Boolean(body?.solidVoxels);
+      light.visible = this.gridPowered && Boolean(body?.solidVoxels);
       if (!body) continue;
       const position = transformPoint(body.transform, def.position);
       let moved = light.position.x !== position.x || light.position.y !== position.y || light.position.z !== position.z;

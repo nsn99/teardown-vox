@@ -19,11 +19,13 @@ export class SessionCheckpoint {
     this.fingerprint = JSON.stringify([hash >>> 0, h.level.spawn, h.level.vehicles, h.level.gates, h.level.cranes,
       h.level.mission, this.bodies.map(b => [b.name, b.transform]),
       this.shapes.map(s => [s.name, s.sx, s.sy, s.sz, s.voxelSize, s.transform])]);
+    if (h.level.revision) this.fingerprint += JSON.stringify([h.level.revision, h.level.hydro, h.level.mapExits]);
   }
 
   capture() {
     const h = this.h;
     return structuredClone({ version: 1 as const, fingerprint: this.fingerprint, levelId: h.level.id, savedAt: Date.now(), sandbox: h.sandbox,
+      mapRevision: h.level.revision, hydro: h.hydro?.snapshot(),
       bodies: [...new Set([...this.bodies, ...h.sim.world.bodies.values()])].map(b => ({
         id: b.id, base: this.bodies.indexOf(b), kind: b.kind, name: b.name, tags: [...b.tags],
         passive: b.passive, kinematic: b.kinematic, transform: b.transform,
@@ -63,6 +65,7 @@ export class SessionCheckpoint {
   restore(saved: SessionSave): void {
     const h = this.h;
     if (saved.version !== 1 || saved.levelId !== h.level.id || saved.sandbox !== h.sandbox || saved.fingerprint !== this.fingerprint) throw new Error('Несовместимое сохранение');
+    if (h.hydro && !saved.hydro) throw new Error('В сохранении отсутствует состояние ГЭС');
     const bodies = new Map<number, Body>(), shapes = new Map<number, VoxelShape>();
     const retainedShapes = new Set(saved.bodies.flatMap(b => b.shapes.map(s => s.base)).filter(i => i >= 0));
     // Call only on a newly constructed level, before the first physics step.
@@ -118,6 +121,8 @@ export class SessionCheckpoint {
     h.sim.destruction.restore(saved.destruction, new Map([...bodies].map(([old, body]) => [old, body.id])));
     h.charges.restore(saved.charges); h.sim.fire.restore(saved.fire, bodies, shapes); h.sim.smoke.restore(saved.smoke);
     saved.chasers.forEach((r, i) => h.pursuit.chasers[i]?.restore(r, bodies));
+    if (saved.hydro) h.hydro?.restore(saved.hydro);
+    for (const crane of h.cranes.values()) crane.powered = h.hydro?.powered ?? true;
     for (const b of h.sim.world.bodies.values()) h.sim.physics.sync(b);
   }
 }

@@ -27,6 +27,8 @@ export class PortCrane {
   angle: number;
   ropeLength: number;
   blocked = false;
+  /** Electric drives stop on grid failure; the mechanical brake still holds. */
+  powered = true;
   private parts: Part[];
   private base: { body: Body; shape: VoxelShape; indices: number[] };
   private boomSupport: number[];
@@ -168,6 +170,7 @@ export class PortCrane {
   update(input: CraneInput, dt: number): void {
     this.checkDamage();
     if (!this.operable || dt <= 0) return;
+    if (!this.powered) input = NEUTRAL_CRANE_INPUT;
     dt = Math.min(dt, 0.1);
     const old = { yaw: this.yaw, angle: this.angle, length: this.ropeLength };
     this.yaw -= clamp(input.slew, -1, 1) * this.def.slewSpeed * dt;

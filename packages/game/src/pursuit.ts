@@ -270,8 +270,9 @@ export class Pursuit {
    */
   update(sim: Simulation, dt: number, state: PursuitState, target: Vec3): void {
     for (const c of this.chasers) {
+      const surface = c.spec.aquatic ? sim.world.waterSurface?.(target) : undefined;
       if (!c.active) {
-        if (!this.shouldLaunch(c, state, target)) continue;
+        if (surface === null || !this.shouldLaunch(c, state, target, surface ?? this.waterLevel)) continue;
         c.phase = 'inbound';
         c.spawn(sim, this.voxelSize);
         this.events.emit('pursuit:inbound', {
@@ -281,7 +282,11 @@ export class Pursuit {
       }
 
       const timeLeft = state.finished ? 0.2 : state.timeLeft;
-      c.advance(target, timeLeft, dt);
+      if (c.spec.aquatic && sim.world.waterSurface) {
+        const ownSurface = sim.world.waterSurface(c.position);
+        if (ownSurface !== null) c.position.y = ownSurface;
+        c.advance(surface === null ? c.position : { ...target, y: (surface ?? this.waterLevel) - c.spec.hover }, timeLeft, dt);
+      } else c.advance(target, timeLeft, dt);
 
       const d = c.distanceTo(target);
       if (d <= this.close && !this.announced.has(c.spec.kind)) {
@@ -298,12 +303,12 @@ export class Pursuit {
     }
   }
 
-  private shouldLaunch(c: Chaser, state: PursuitState, target: Vec3): boolean {
+  private shouldLaunch(c: Chaser, state: PursuitState, target: Vec3, waterLevel = this.waterLevel): boolean {
     if (!state.alarmActive) return false;
     if (state.timeLeft > c.spec.lead) return false;
     // Катер выходит, только если игрок ушёл на воду: гонять его по
     // набережной было бы просто смешно.
-    if (c.spec.aquatic && target.y > this.waterLevel + 1.2) return false;
+    if (c.spec.aquatic && target.y > waterLevel + 1.2) return false;
     return true;
   }
 

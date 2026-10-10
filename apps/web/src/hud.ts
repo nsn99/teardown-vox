@@ -23,6 +23,7 @@ export class Hud {
   private hint = $('hint');
   private stats = $('stats');
   private crane = $('crane-status');
+  private hydro = $('hydro-status');
   private hintTimer = 0;
 
   constructor() {
@@ -96,12 +97,19 @@ export class Hud {
     }
 
     this.stats.textContent = extra;
+    this.hydro.hidden = !heist.hydro;
+    if (heist.hydro) {
+      const phases = { intact: 'ГЭС работает', warning: 'Авария ГЭС', flooding: 'Паводок', stable: 'Берег затоплен' };
+      this.hydro.textContent = `${phases[heist.hydro.phase]} · вода ${heist.hydro.level.toFixed(1)} м · ${heist.hydro.powered ? 'питание включено' : 'питание отключено'} · B — карта`;
+      this.hydro.classList.toggle('is-flooding', !heist.hydro.powered);
+    }
 
     const crane = heist.operating;
     this.crane.hidden = !crane && !heist.nearbyCrane;
     if (crane) {
       const degrees = (angle: number) => Math.round(angle * 180 / Math.PI);
       this.crane.textContent = `КРАН · поворот ${degrees(crane.yaw)}° · стрела ${degrees(crane.angle)}° · крюк ${crane.grip.y.toFixed(1)} м\n` +
+        (!crane.powered ? 'Питание отключено. Тормоз удерживает груз.\n' : '') +
         (crane.blocked ? 'На пути препятствие. Поднимите крюк или смените направление.\n' : '') +
         (!crane.hoistIntact ? 'Крюк, трос или стрела повреждены.\n' : '') +
         (crane.load ? `Груз: ${crane.load.name}\n` : 'Груз не зацеплен\n') +

@@ -3,6 +3,10 @@ import { overlapsMaterial } from './character.js';
 
 /** Вода вокруг самой камеры: мокрые ноги или посадка в катер не включают подводный туман. */
 export function cameraUnderwater(world: VoxelWorld, eye: Vec3): boolean {
+  if (world.waterSurface) {
+    const surface = world.waterSurface(eye);
+    return surface !== null && eye.y < surface;
+  }
   return overlapsMaterial(world, { min: v3(eye.x - 0.001, eye.y - 0.001, eye.z - 0.001),
     max: v3(eye.x + 0.001, eye.y + 0.001, eye.z + 0.001) }, Mat.Water);
 }

@@ -39,6 +39,7 @@
 
       <div id="hint" class="hint"></div>
       <div id="crane-status" class="crane-status" hidden></div>
+      <div id="hydro-status" class="hydro-status" hidden></div>
       <div id="stats" class="stats"></div>
     </div>
 
@@ -61,6 +62,17 @@
           <button id="btn-save-session" class="btn" hidden>Сохранить сессию</button>
           <button id="btn-mission" class="btn btn--primary">Начать ограбление</button>
           <button id="btn-sandbox" class="btn">Песочница</button>
+          <button id="btn-world-map" class="btn">Схема карты</button>
+        </div>
+
+        <div class="session-tools">
+          <label for="session-select">Сохранённые сессии</label>
+          <select id="session-select" hidden></select>
+          <div class="menu__buttons">
+            <button id="btn-export-session" class="btn" hidden>Экспорт сохранения</button>
+            <button id="btn-import-session" class="btn">Импорт сохранения</button>
+          </div>
+          <input id="session-import" type="file" accept=".json" hidden>
         </div>
 
         <p id="session-status" role="status">Автосохранение каждые 20 секунд</p>
@@ -70,6 +82,7 @@
             <tr><td>WASD</td><td>движение</td></tr>
             <tr><td>Shift / Ctrl</td><td>бег / присед</td></tr>
             <tr><td>Пробел</td><td>прыжок, в воде — всплытие</td></tr>
+            <tr><td>B</td><td>схема карты</td></tr>
             <tr><td>T / Y</td><td>поднять / опустить ковш; при движении он работает автоматически</td></tr>
             <tr><td>[ / ]</td><td>уменьшить / увеличить предел скорости техники</td></tr>
             <tr><td>ЛКМ</td><td>применить инструмент</td></tr>

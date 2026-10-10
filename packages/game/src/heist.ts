@@ -16,7 +16,8 @@ import { HandCarry } from './hand-carry.js';
 import { CameraShake, ShakeState } from './camera.js';
 import { CharacterController, CharacterInput, overlapsSolid } from './character.js';
 import { Inventory } from './inventory.js';
-import { LevelSource, TriggerDef, TriggerSystem } from './level.js';
+import { LevelSource, MapExitDef, TriggerDef, TriggerSystem } from './level.js';
+import { Hydropower } from './hydropower.js';
 import { Mission, MissionResult } from './mission.js';
 import { Profile } from './progression.js';
 import { Pursuit } from './pursuit.js';
@@ -48,6 +49,7 @@ export interface HeistEvents extends Record<string, unknown> {
   'crane:entered': { id: string };
   'crane:exited': { id: string };
   'trigger:fired': { trigger: TriggerDef };
+  'map:exit': { exit: MapExitDef };
 }
 
 export const DEFAULT_INPUT: CharacterInput = {
@@ -101,6 +103,8 @@ export class Heist {
   readonly vehicles = new Map<string, Vehicle>();
   readonly gates: AutomaticGate[] = [];
   readonly cranes = new Map<string, PortCrane>();
+  hydro: Hydropower | null = null;
+  private insideExit: string | null = null;
 
   /** Физические тела целей: id цели → тело в мире. */
   readonly targetBodies = new Map<string, Body>();
@@ -206,6 +210,7 @@ export class Heist {
     if (this.started) return;
     this.started = true;
     this.level.build(this.sim);
+    if (this.level.hydro) this.hydro = new Hydropower(this.sim, this.level.hydro);
     for (const def of this.level.gates ?? []) this.gates.push(new AutomaticGate(this.sim, def));
     for (const def of this.level.cranes ?? []) this.cranes.set(def.id, new PortCrane(this.sim, def));
     for (const spawn of this.level.vehicles) {
@@ -563,10 +568,12 @@ export class Heist {
 
     this.inventory.tick(dt);
     this.charges.step(this.sim, dt, this.protectedMaterials());
+    this.hydro?.update(dt);
 
     const veh = this.driving;
     const operator = this.operating;
     for (const crane of this.cranes.values()) {
+      crane.powered = this.hydro?.powered ?? true;
       const yaw = crane.yaw;
       crane.update(crane === operator ? craneInput : NEUTRAL_CRANE_INPUT, dt);
       if (crane === operator) this.yaw += Math.atan2(Math.sin(crane.yaw - yaw), Math.cos(crane.yaw - yaw));
@@ -596,10 +603,14 @@ export class Heist {
     this.hands.update(this.sim, this.eye, this.aimDirection, this.character.aabbAt(this.character.position));
     this.sim.focus = this.playerPosition;
     this.sim.step(dt);
+    this.hydro?.update(0);
     for (const vehicle of this.vehicles.values()) vehicle.afterPhysics();
     if (veh) this.character.teleport(add(veh.position, v3(0, 0.5, 0)));
     // Отложенный урон и структурный проход могли оборвать крепление в этом же кадре.
-    for (const crane of this.cranes.values()) crane.update(NEUTRAL_CRANE_INPUT, 0);
+    for (const crane of this.cranes.values()) {
+      crane.powered = this.hydro?.powered ?? true;
+      crane.update(NEUTRAL_CRANE_INPUT, 0);
+    }
     if (this.operating && !this.operating.operable) this.toggleCrane();
     this.shakeState = this.shake.update(dt);
 
@@ -616,6 +627,10 @@ export class Heist {
     this.moveCargo();
 
     const pos = this.playerPosition;
+    const exit = this.level.mapExits?.find(e => Math.abs(pos.x - e.center.x) <= e.halfExtents.x &&
+      Math.abs(pos.y - e.center.y) <= e.halfExtents.y && Math.abs(pos.z - e.center.z) <= e.halfExtents.z);
+    if (exit && exit.id !== this.insideExit) this.events.emit('map:exit', { exit });
+    this.insideExit = exit?.id ?? null;
     if (!this.sandbox) {
       this.mission.update(dt, pos);
       for (const t of this.triggers.update('player', pos)) {

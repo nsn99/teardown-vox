@@ -418,3 +418,18 @@ body.is-dropping::after {
 .touch-lift { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 120px); display: flex; gap: 8px; }
 #touch-controls .touch-lift button { width: 56px; }
 #session-status { font-size: 12px; color: var(--muted); order: 4; }
+.session-tools { margin: 12px 0; order: 4; }
+.session-tools label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.session-tools select { width: 100%; padding: 9px; margin-bottom: 10px; background: #202830; color: #e6e7de; border: 1px solid var(--line); border-radius: 6px; }
+.hydro-status { position: fixed; bottom: 108px; left: 18px; right: 18px; font-size: 12px; color: #d5d8bf; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.hydro-status.is-flooding { color: #ffd3a3; }
+.world-map { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 12px; background: #080f13dc; }
+.world-map[hidden] { display: none; }
+.world-map__panel { width: min(590px, 95vw); max-height: 95dvh; overflow: auto; padding: 20px; border: 1px solid #52645a; border-radius: 16px; background: #18231e; color: #edf1dd; }
+.world-map__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.world-map__header small { font-size: 10px; letter-spacing: 0.12em; color: #a8b6a1; }
+.world-map__header h2 { margin: 5px 0 12px; font-size: 24px; }
+.world-map svg { width: 100%; max-height: 58dvh; display: block; }
+.world-map p { font-size: 13px; line-height: 1.45; }
+.world-map__note { color: #a9b9a8; }
+@media (max-width: 640px) { .hydro-status { bottom: 156px; left: 12px; font-size: 10px; } }

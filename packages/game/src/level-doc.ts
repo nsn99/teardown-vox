@@ -20,6 +20,7 @@ import {
   GateDef,
   LevelSource,
   LightDef,
+  MapExitDef,
   RouteNeeds,
   SpawnPoint,
   TriggerDef,
@@ -29,6 +30,7 @@ import {
 import { ChaserKind, ChaserSpec } from './pursuit.js';
 import { MissionConfig, TargetSpec } from './mission.js';
 import { VehicleKind, VEHICLES } from './vehicles.js';
+import type { HydroDef } from './hydropower.js';
 
 /**
  * Формат карты.
@@ -157,6 +159,9 @@ export interface LevelDoc {
   format: typeof LEVEL_FORMAT;
   version: number;
   id: string;
+  revision?: string;
+  hydro?: HydroDef;
+  mapExits?: (Omit<MapExitDef, 'center' | 'halfExtents'> & { center: Vec3Doc; halfExtents: Vec3Doc })[];
   name: string;
   brief: string;
   voxelSize: number;
@@ -659,6 +664,9 @@ export function parseLevelDoc(input: unknown): LevelDoc {
     format: LEVEL_FORMAT,
     version,
     id: str(o.id, 'id'),
+    ...(o.revision === undefined ? {} : { revision: str(o.revision, 'revision') }),
+    ...(o.hydro === undefined ? {} : { hydro: parseHydro(o.hydro, volumes, props ?? []) }),
+    ...(o.mapExits === undefined ? {} : { mapExits: parseMapExits(o.mapExits) }),
     name: str(o.name, 'name'),
     brief: str(o.brief, 'brief'),
     voxelSize,
@@ -688,6 +696,51 @@ export function parseLevelDoc(input: unknown): LevelDoc {
 }
 
 const ROUTE_NEEDS: readonly RouteNeeds[] = ['foot', 'planks', 'vehicle', 'boat'];
+
+function parseHydro(input: unknown, volumes: VolumeDoc[], props: PropDoc[]): HydroDef {
+  if (!isObj(input)) fail('hydro', 'ожидался объект ГЭС');
+  const o = input as Record<string, unknown>;
+  if (!Array.isArray(o.critical) || !o.critical.length || !Array.isArray(o.water) || !o.water.length || !isObj(o.bridge)) fail('hydro', 'нужны узлы, вода и мост');
+  const critical = (o.critical as Record<string, unknown>[]).map((c, i) => {
+    if (!isObj(c)) fail(`hydro.critical[${i}]`, 'ожидался узел ГЭС');
+    const volume = str(c.volume, `hydro.critical[${i}].volume`), minIntegrity = num(c.minIntegrity, 'hydro.minIntegrity');
+    if (!volumes.some(v => v.name === volume) || minIntegrity <= 0 || minIntegrity > 1) fail('hydro.critical', 'неверный объём или порог прочности');
+    return { volume, minIntegrity };
+  });
+  const water = (o.water as Record<string, unknown>[]).map((w, i) => {
+    if (!isObj(w)) fail(`hydro.water[${i}]`, 'ожидалось описание воды');
+    const body = str(w.body, `hydro.water[${i}].body`);
+    if (!props.some(p => p.name === body && p.tags?.includes('water') && p.passive)) fail('hydro.water', 'вода должна ссылаться на пассивное тело воды');
+    return { body, initial: num(w.initial, 'hydro.water.initial'), final: num(w.final, 'hydro.water.final') };
+  });
+  const b = o.bridge as Record<string, unknown>, volume = str(b.volume, 'hydro.bridge.volume');
+  const bridgeVolume = volumes.find(v => v.name === volume);
+  if (!bridgeVolume || !Array.isArray(b.scourBox) || b.scourBox.length !== 6) fail('hydro.bridge', 'нет моста или области подмыва');
+  const scourBox = (b.scourBox as unknown[]).map(n => int(n, 'hydro.bridge.scourBox', 0)) as HydroDef['bridge']['scourBox'];
+  const deckCuts = b.deckCuts === undefined ? undefined : (Array.isArray(b.deckCuts) ? b.deckCuts : fail('hydro.bridge.deckCuts', 'ожидался список разломов')).map((box, i) => {
+    if (!Array.isArray(box) || box.length !== 6) fail('hydro.bridge.deckCuts', 'ожидалась область из шести координат');
+    return box.map(n => int(n, `hydro.bridge.deckCuts[${i}]`, 0)) as HydroDef['bridge']['scourBox'];
+  });
+  for (const box of [scourBox, ...(deckCuts ?? [])]) for (let axis = 0; axis < 3; axis++) {
+    if (box[axis] >= box[axis + 3] || box[axis + 3] > bridgeVolume.size[axis]) fail('hydro.bridge.scourBox', 'область разрушения вне моста');
+  }
+  const warningSeconds = num(o.warningSeconds, 'hydro.warningSeconds'), floodSeconds = num(o.floodSeconds, 'hydro.floodSeconds');
+  if (warningSeconds < 0 || floodSeconds <= 0) fail('hydro', 'неверное время паводка');
+  return { critical, water, bridge: { volume, scourBox, ...(deckCuts ? { deckCuts } : {}), failLevel: num(b.failLevel, 'hydro.bridge.failLevel') }, warningSeconds, floodSeconds };
+}
+
+function parseMapExits(input: unknown): NonNullable<LevelDoc['mapExits']> {
+  if (!Array.isArray(input)) fail('mapExits', 'ожидался список выходов');
+  return (input as Record<string, unknown>[]).map((e, i) => {
+    const path = `mapExits[${i}]`;
+    if (!isObj(e)) fail(path, 'ожидался выход карты');
+    const halfExtents = vec3(e.halfExtents, `${path}.halfExtents`);
+    if (halfExtents.some(n => n <= 0)) fail(path, 'размер выхода должен быть положительным');
+    return { id: str(e.id, `${path}.id`), center: vec3(e.center, `${path}.center`), halfExtents,
+      enabled: Boolean(e.enabled), label: str(e.label, `${path}.label`),
+      ...(e.destination === undefined ? {} : { destination: str(e.destination, `${path}.destination`) }) };
+  });
+}
 
 function parseCrane(value: unknown, path: string, volumes: VolumeDoc[], props: PropDoc[], voxelSize: number): CraneDoc {
   if (!isObj(value)) fail(path, 'ожидался объект крана');
@@ -1033,6 +1086,9 @@ export function levelFromDoc(input: LevelDoc | unknown): LevelSource & { doc: Le
 
   return {
     id: doc.id,
+    ...(doc.revision ? { revision: doc.revision } : {}),
+    ...(doc.hydro ? { hydro: structuredClone(doc.hydro) } : {}),
+    ...(doc.mapExits ? { mapExits: doc.mapExits.map(e => ({ ...e, center: point(e.center), halfExtents: point(e.halfExtents) })) } : {}),
     name: doc.name,
     brief: doc.brief,
     voxelSize: doc.voxelSize,
@@ -1123,6 +1179,9 @@ export function docFromLevel(level: LevelSource, sim: Simulation): LevelDoc {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     id: level.id,
+    ...(level.revision ? { revision: level.revision } : {}),
+    ...(level.hydro ? { hydro: structuredClone(level.hydro) } : {}),
+    ...(level.mapExits ? { mapExits: level.mapExits.map(e => ({ ...e, center: flat(e.center), halfExtents: flat(e.halfExtents) })) } : {}),
     name: level.name,
     brief: level.brief,
     voxelSize: level.voxelSize,

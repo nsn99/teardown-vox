@@ -17,6 +17,8 @@ export * from './pursuit.js';
 export * from './level-doc.js';
 export * from './vox.js';
 export * from './session.js';
+export * from './hydropower.js';
+export * from './levels/expanded-port.js';
 
 export * from './hand-carry.js';
 

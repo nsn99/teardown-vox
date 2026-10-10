@@ -16,6 +16,7 @@ import {
   ToolId,
   VehicleInput,
   portLevel,
+  expandedPortLevel,
   toolBySlot,
 } from '@tvox/game';
 import {
@@ -37,7 +38,9 @@ import { AudioPlayer } from './audio-player.js';
 import { Input } from './input.js';
 import { Hud, Menu, ResultScreen, money } from './hud.js';
 import { TouchControls, prefersTouch } from './touch-controls.js';
-import { saveSession, loadSession } from './session-store.js';
+import { saveSession, listSessions, sessionKey, SessionSlot } from './session-store.js';
+import { decodeSession, encodeSession } from './session-file.js';
+import { WorldMap } from './world-map.js';
 import { enableLevelDrop } from './level-drop.js';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -67,7 +70,8 @@ let heist: Heist | null = null;
  * Текущая карта. По умолчанию «Порт», но её можно заменить, бросив файл
  * в окно: игра не знает и не должна знать, откуда карта взялась.
  */
-let level: LevelSource = portLevel;
+let level: LevelSource = expandedPortLevel;
+let newRunLevel: LevelSource = expandedPortLevel;
 let paused = true;
 let canResume = false;
 let checkpoint: SessionCheckpoint | null = null;
@@ -75,13 +79,64 @@ let savedSession: SessionSave | null = null;
 let saving = false;
 const saveStatus = document.getElementById('session-status')!;
 const loadButton = document.getElementById('btn-load-session') as HTMLButtonElement;
-loadButton.addEventListener('click', () => { if (savedSession) startRun(savedSession.sandbox, savedSession); });
+const sessionSelect = document.getElementById('session-select') as HTMLSelectElement;
+let sessionSlots: SessionSlot[] = [];
+sessionSelect.addEventListener('change', () => { savedSession = sessionSlots.find(s => s.key === sessionSelect.value)?.save ?? null; });
+loadButton.addEventListener('click', () => {
+  if (!savedSession) return;
+  const map = savedLevel(savedSession);
+  if (!map) { saveStatus.textContent = 'Для этого сохранения нужна другая версия карты. Файл можно экспортировать.'; return; }
+  startRun(savedSession.sandbox, savedSession, map);
+});
 document.getElementById('btn-save-session')!.addEventListener('click', () => { void persistSession(); });
-void loadSession().then(saved => {
-  if (!saved || saved.levelId !== level.id || canResume) return;
-  savedSession = saved; loadButton.hidden = false;
-  saveStatus.textContent = `Есть сохранение: ${new Date(saved.savedAt).toLocaleString('ru-RU')}`;
+function savedLevel(save: SessionSave): LevelSource | null {
+  if (save.levelId === portLevel.id && !save.mapRevision) return portLevel;
+  if (save.levelId === expandedPortLevel.id && save.mapRevision === expandedPortLevel.revision) return expandedPortLevel;
+  if (save.levelId === newRunLevel.id && save.mapRevision === newRunLevel.revision) return newRunLevel;
+  return null;
+}
+async function refreshSessions(selected?: string): Promise<void> {
+  sessionSlots = await listSessions();
+  sessionSelect.replaceChildren(...sessionSlots.map(slot => {
+    const option = document.createElement('option'); option.value = slot.key;
+    const name = slot.save.levelId === 'port' ? 'Порт · прежняя карта' : slot.save.levelId === 'port-expanded' ? 'Озеро и ГЭС' : slot.save.levelId;
+    option.textContent = `${slot.archived ? 'Архив · ' : ''}${name} · ${slot.save.sandbox ? 'песочница' : 'ограбление'} · ${new Date(slot.save.savedAt).toLocaleString('ru-RU')}`;
+    return option;
+  }));
+  if (selected && sessionSlots.some(s => s.key === selected)) sessionSelect.value = selected;
+  else sessionSelect.value = sessionSlots.find(s => !s.archived)?.key ?? sessionSlots[0]?.key ?? '';
+  savedSession = sessionSlots.find(s => s.key === sessionSelect.value)?.save ?? null;
+  sessionSelect.hidden = loadButton.hidden = document.getElementById('btn-export-session')!.hidden = !savedSession;
+}
+void refreshSessions().then(() => {
+  if (savedSession && !canResume) saveStatus.textContent = 'Сохранения доступны. Прежний порт загружается на прежней карте.';
 }).catch(() => { saveStatus.textContent = 'Хранилище сохранений недоступно в этом браузере'; });
+document.getElementById('btn-export-session')!.addEventListener('click', () => {
+  if (!savedSession) return;
+  const blob = new Blob([encodeSession(savedSession)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = `teardown-${savedSession.levelId}-${savedSession.sandbox ? 'sandbox' : 'mission'}-${savedSession.savedAt}.tvox-session.json`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+const importInput = document.getElementById('session-import') as HTMLInputElement;
+document.getElementById('btn-import-session')!.addEventListener('click', () => importInput.click());
+importInput.addEventListener('change', () => {
+  const file = importInput.files?.[0]; importInput.value = '';
+  if (!file) return;
+  void (async () => {
+    try {
+      const save = decodeSession(await file.text());
+      // Validate geometry on a separate world before touching a stored slot or the run.
+      const map = savedLevel(save);
+      if (!map) throw new Error('Версия карты из файла сейчас недоступна');
+      const probe = new Heist({ level: map, sandbox: save.sandbox });
+      try { probe.start(); new SessionCheckpoint(probe).restore(save); }
+      finally { probe.sim.dispose(); }
+      await saveSession(save); await refreshSessions(sessionKey(save));
+      saveStatus.textContent = 'Файл проверен и импортирован. Нажмите «Загрузить сохранение».';
+    } catch (error) { saveStatus.textContent = `Импорт не выполнен: ${error instanceof Error ? error.message : 'не удалось прочитать файл'}`; }
+  })();
+});
 
 async function persistSession(): Promise<void> {
   if (saving || !checkpoint || !canResume) return;
@@ -90,7 +145,7 @@ async function persistSession(): Promise<void> {
   try {
     const saved = checkpoint.capture();
     await saveSession(saved);
-    savedSession = saved; loadButton.hidden = false;
+    await refreshSessions(sessionKey(saved));
     saveStatus.textContent = `Сохранено ${new Date(saved.savedAt).toLocaleTimeString('ru-RU')}`;
   } catch { saveStatus.textContent = 'Не удалось сохранить: проверьте свободное место и настройки браузера'; }
   finally { saving = false; }
@@ -104,11 +159,27 @@ let thirdPerson = false;
 let smoothedFrame = 16;
 let captureMode = false;
 let physicsReady: Promise<void> = Promise.resolve();
+let resumeAfterMap = false;
+const worldMap = new WorldMap(() => {
+  input.reset();
+  if (resumeAfterMap) { resumeAfterMap = false; resumeRun(); }
+});
+function openWorldMap(): void {
+  resumeAfterMap = !paused;
+  if (!paused) toHub();
+  worldMap.show(heist);
+}
+document.getElementById('btn-world-map')!.addEventListener('click', openWorldMap);
+document.addEventListener('keydown', e => {
+  if (!paused || e.repeat || /^(INPUT|SELECT|TEXTAREA)$/.test((e.target as HTMLElement)?.tagName)) return;
+  if (e.code === 'KeyB') { input.reset(); if (worldMap.visible) worldMap.close(); else openWorldMap(); }
+  else if (e.code === 'Escape' && worldMap.visible) worldMap.close();
+});
 
 const menu = new Menu({
   onResume: () => resumeRun(),
-  onMission: () => startRun(false),
-  onSandbox: () => startRun(true),
+  onMission: () => startRun(false, undefined, newRunLevel),
+  onSandbox: () => startRun(true, undefined, newRunLevel),
   onUpgrade: (tool) => {
     const res = profile.upgrade(tool);
     if (res.ok) {
@@ -172,7 +243,20 @@ function saveProfile(): void {
 
 // ---------------------------------------------------------------------------
 
-function startRun(inSandbox: boolean, saved?: SessionSave): void {
+function startRun(inSandbox: boolean, saved?: SessionSave, map: LevelSource = level): void {
+  const next = new Heist({ level: map, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
+  let nextCheckpoint: SessionCheckpoint;
+  try {
+    next.start(); nextCheckpoint = new SessionCheckpoint(next);
+    if (saved) nextCheckpoint.restore(saved);
+  } catch (error) {
+    next.sim.dispose();
+    menu.setResumable(canResume); menu.show();
+    saveStatus.textContent = `Не удалось восстановить сессию: ${error instanceof Error ? error.message : 'карта несовместима'}`;
+    return;
+  }
+  level = map;
+  menu.render(profile, level.brief);
   player.suspend();
   sandbox = inSandbox;
   canResume = true;
@@ -185,19 +269,8 @@ function startRun(inSandbox: boolean, saved?: SessionSave): void {
   extinguisherHitUntil = 0;
   chargeView.update([]);
 
-  heist = new Heist({ level, profile, sandbox: inSandbox, simulation: { frameBudgetMs: 8 } });
-  heist.start();
-  checkpoint = new SessionCheckpoint(heist);
-  if (saved) {
-    try { checkpoint.restore(saved); }
-    catch {
-      heist.sim.dispose(); heist = null; checkpoint = null; canResume = false; paused = true;
-      menu.setResumable(false); menu.show();
-      document.getElementById('btn-save-session')!.hidden = true;
-      saveStatus.textContent = 'Не удалось восстановить сессию: карта или сохранение несовместимы';
-      return;
-    }
-  }
+  heist = next;
+  checkpoint = nextCheckpoint;
   thirdPerson = heist.driving !== null;
   // Карта строится целиком в первый же кадр: бюджет ремеша — про
   // разрушение по ходу игры, а не про загрузку уровня.
@@ -205,6 +278,7 @@ function startRun(inSandbox: boolean, saved?: SessionSave): void {
   renderer.setBackdrop(level.environment?.backdrop);
   renderer.setDaylight(level.environment?.daylight ?? 'dusk');
   renderer.setLevelLights(level.environment?.lights ?? []);
+  renderer.setGridPower(heist.hydro?.powered ?? true);
   wireEvents(heist);
   physicsReady = upgradeToRapier(heist);
 
@@ -272,6 +346,11 @@ async function upgradeToRapier(h: Heist): Promise<void> {
 }
 
 function wireEvents(h: Heist): void {
+  h.hydro?.events.on('hydro:failed', () => hud.message('ГЭС повреждена · питание отключено. Через 8 секунд начнётся паводок. Поднимайтесь на кольцевую дорогу.', 8));
+  h.hydro?.events.on('hydro:flooding', () => hud.message('Вода прибывает · низкий берег затапливается. Кольцевая дорога остаётся выше воды.', 6));
+  h.hydro?.events.on('hydro:bridge', () => hud.message('Служебный мост ГЭС обрушился', 5));
+  h.hydro?.events.on('hydro:stable', () => hud.message('Паводок достиг максимума · берег затоплен', 5));
+  h.events.on('map:exit', ({ exit }) => hud.message(exit.label, 6));
   h.sim.world.events.on('voxels:removed', (e) => {
     if (e.count > 0) particles.emitSmoke(e.center, Math.min(6, 1 + e.count / 40), 0.8);
     if (e.debris) particles.emitDebris(e.debris, e.cause === 'explosive' ? 1.5 : 1);
@@ -326,6 +405,7 @@ function wireEvents(h: Heist): void {
 const vehicleInput: VehicleInput = { ...NEUTRAL_INPUT };
 
 function handleActions(h: Heist): void {
+  if (input.take('KeyB')) { openWorldMap(); return; }
   for (let slot = 1; slot <= 8; slot++) {
     if (input.take(`Digit${slot}`)) {
       const id = toolBySlot(slot);
@@ -610,6 +690,7 @@ function frame(now: number): void {
     for (const wheel of vehicle.wheels) renderer.setShapeVisualPose(wheel.shape.id, wheel.pose);
     if (vehicle.tracks.length) renderer.setVehicleTracks(vehicle.body.id, vehicle.tracks);
   }
+  renderer.setGridPower(h.hydro?.powered ?? true);
   renderer.sync(h.sim.world);
   chargeView.update(h.charges.list());
   renderer.render();
@@ -777,6 +858,7 @@ window.tvox = {
 enableLevelDrop(window, {
   onLevel(next, fileName) {
     level = next;
+    newRunLevel = next;
     hud.message(`Карта: ${next.name} (${fileName})`, 3);
     menu.render(profile, level.brief);
     if (paused) menu.show();

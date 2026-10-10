@@ -95,6 +95,8 @@ const NEIGHBORS: ReadonlyArray<readonly [number, number, number]> = [
  * поэтому спидран воспроизводим, а тесты не мигают.
  */
 export class FireSystem {
+  private waterSurface?: (position: Vec3) => number | null;
+  setWaterSurface(surface?: (position: Vec3) => number | null): void { this.waterSurface = surface; }
   private cfg: Required<FireOptions>;
   private rng: () => number;
   private shapes = new Map<number, ShapeFire>();
@@ -145,9 +147,11 @@ export class FireSystem {
   }
 
   private isSubmerged(body: Body, shape: VoxelShape, index: number): boolean {
-    if (this.cfg.waterLevel === -Infinity) return false;
+    if (!this.waterSurface && this.cfg.waterLevel === -Infinity) return false;
     const c = shape.coords(index);
-    return shape.voxelCenterWorld(c.x, c.y, c.z, body.transform).y <= this.cfg.waterLevel;
+    const point = shape.voxelCenterWorld(c.x, c.y, c.z, body.transform);
+    const surface = this.waterSurface ? this.waterSurface(point) : this.cfg.waterLevel;
+    return surface !== null && point.y <= surface;
   }
 
   private slot(body: Body, shape: VoxelShape): ShapeFire {

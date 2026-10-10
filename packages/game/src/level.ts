@@ -2,6 +2,7 @@ import { Body, EventBus, Simulation, Vec3, aabbContains, v3 } from '@tvox/core';
 import { MissionConfig } from './mission.js';
 import { ChaserSpec } from './pursuit.js';
 import { VehicleKind } from './vehicles.js';
+import type { HydroDef } from './hydropower.js';
 
 export type TriggerKind = 'alarm-cable' | 'extraction' | 'checkpoint' | 'hazard';
 
@@ -139,6 +140,10 @@ export interface EscapeRoute {
 
 export interface LevelSource {
   id: string;
+  /** Geometry revision; omitted for the exact legacy port checkpoint. */
+  revision?: string;
+  hydro?: HydroDef;
+  mapExits?: MapExitDef[];
   name: string;
   brief: string;
   voxelSize: number;
@@ -158,6 +163,15 @@ export interface LevelSource {
   routes?: EscapeRoute[];
   /** Создаёт тела уровня и возвращает их. */
   build(sim: Simulation): Body[];
+}
+
+export interface MapExitDef {
+  id: string;
+  center: Vec3;
+  halfExtents: Vec3;
+  enabled: boolean;
+  destination?: string;
+  label: string;
 }
 
 export interface TriggerEvents extends Record<string, unknown> {
